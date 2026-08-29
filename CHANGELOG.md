@@ -28,4 +28,6 @@ releases.
 - `Test.Automated`: 73 tests covering key mapping, caching, configuration, cryptography,
   locking, sharing, the IPC channel, and the Dokan filesystem, plus storage integration tests
   that run against any S3 or S3-compatible endpoint (CLI arguments or `S3DRIVE_TEST_*`
-  variables). `test/run-integration.{sh,bat}` exercises them against an ephemeral container.
+  variables). `test/run-integration.{sh,bat}` exercises them against an ephemeral Less3
+  container. A `--mount-test` mode performs a real Dokan mount and drives operating-system-level
+  file operations against the mounted drive (requires Windows and the Dokany driver).
