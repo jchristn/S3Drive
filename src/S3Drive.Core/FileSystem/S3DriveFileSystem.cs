@@ -8,6 +8,7 @@ namespace S3Drive.Core.FileSystem
     using System.Threading.Tasks;
     using DokanNet;
     using S3Drive.Core.Concurrency;
+    using S3Drive.Core.Diagnostics;
     using S3Drive.Core.Storage;
 
     /// <summary>
@@ -110,6 +111,7 @@ namespace S3Drive.Core.FileSystem
                     }
 
                     InvalidateForKey(context.Key, context.IsDirectory);
+                    S3DriveLog.Info((context.IsDirectory ? "rmdir " : "delete ") + KeyMapper.ToPath(context.Key));
                 }
                 else if (!context.IsDirectory && context.Dirty && context.StagingPath != null)
                 {
@@ -119,6 +121,7 @@ namespace S3Drive.Core.FileSystem
                     }
 
                     InvalidateForKey(context.Key, false);
+                    S3DriveLog.Info("write " + KeyMapper.ToPath(context.Key));
                 }
             }
             catch (OperationCanceledException)
@@ -284,6 +287,7 @@ namespace S3Drive.Core.FileSystem
                     files.Add(EntryToInformation(entry));
                 }
 
+                S3DriveLog.Info("list " + KeyMapper.ToPath(prefix) + " (" + entries.Count + ")");
                 return NtStatus.Success;
             }
             catch (OperationCanceledException)
@@ -380,6 +384,7 @@ namespace S3Drive.Core.FileSystem
                 if (isDirectory)
                 {
                     MoveDirectory(oldKey, newKey);
+                    S3DriveLog.Info("move dir " + KeyMapper.ToPath(oldKey) + " -> " + KeyMapper.ToPath(newKey));
                     return NtStatus.Success;
                 }
 
@@ -393,6 +398,7 @@ namespace S3Drive.Core.FileSystem
 
                 InvalidateForKey(oldKey, false);
                 InvalidateForKey(newKey, false);
+                S3DriveLog.Info("move " + KeyMapper.ToPath(oldKey) + " -> " + KeyMapper.ToPath(newKey));
                 return NtStatus.Success;
             }
             catch (OperationCanceledException)
@@ -610,6 +616,7 @@ namespace S3Drive.Core.FileSystem
             }
 
             context.StagingPath = path;
+            S3DriveLog.Info("read " + KeyMapper.ToPath(context.Key));
             return path;
         }
 
@@ -678,6 +685,7 @@ namespace S3Drive.Core.FileSystem
         private void RunPutDirectoryMarker(string key)
         {
             _Store.PutAsync(key + "/", Array.Empty<byte>(), _Token).GetAwaiter().GetResult();
+            S3DriveLog.Info("mkdir " + KeyMapper.ToPath(key));
         }
 
         private void RunDeleteDirectoryMarker(string key)

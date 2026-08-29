@@ -2,6 +2,8 @@ namespace S3Drive.Tui
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
+    using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
     using S3Drive.Core;
@@ -16,32 +18,42 @@ namespace S3Drive.Tui
     using TUIKit.Layout;
     using TUIKit.Modals;
     using TUIKit.Theming;
-    using TUIKit.Widgets;
 
     /// <summary>
-    /// Builds and drives the TUI: a drive list, an activity log, and keyboard actions that send
-    /// commands to the agent and edit the configuration.
+    /// Builds and drives the TUI: a Drives pane and an Activity pane, each with its own keyboard
+    /// shortcut bar. Tab moves focus between the two panes; the focused pane's shortcuts are active
+    /// and its bar is highlighted. Activity tails the shared log file so operations happening in the
+    /// agent and the TUI are visible, and can be copied to the clipboard.
     /// </summary>
     internal sealed class TuiController
     {
         private const int HeaderHeight = 2;
-        private const int LogHeight = 14;
-        private const int HintsHeight = 1;
+        private const int ActivityHeight = 14;
+        private const int HintHeight = 1;
         private const int FillMax = 1_000_000;
+        private const int MaxActivityLines = 2000;
 
         private readonly S3DrivePaths _Paths;
         private readonly SettingsManager _SettingsManager;
         private readonly CredentialProtector _Protector;
+        private readonly object _ActivitySync = new object();
+        private readonly List<string> _ActivityLines = new List<string>();
 
         private readonly Pane _Header = new Pane("header");
         private readonly Pane _Content = new Pane("content");
         private readonly Pane _Log = new Pane("log");
-        private readonly Pane _Hints = new Pane("hints");
+        private readonly HintBar _DrivesHints;
+        private readonly HintBar _ActivityHints;
 
         private TuiApplication? _App;
         private S3DriveSettings _Settings = new S3DriveSettings();
         private AgentStatus? _Status;
         private List<string> _LastContentLines = new List<string>();
+        private bool _ActivityFocused;
+
+        private string? _LogPath;
+        private long _LogPosition;
+        private string _LogPartial = string.Empty;
 
         /// <summary>
         /// Initializes a new controller.
@@ -52,6 +64,31 @@ namespace S3Drive.Tui
             _Paths = paths;
             _SettingsManager = new SettingsManager(paths);
             _Protector = new CredentialProtector(paths.MachineKeyFile);
+
+            _DrivesHints = new HintBar("Drives", new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("Tab", "Activity"),
+                new KeyValuePair<string, string>("c", "Add"),
+                new KeyValuePair<string, string>("e", "Edit"),
+                new KeyValuePair<string, string>("d", "Delete"),
+                new KeyValuePair<string, string>("m", "Mount"),
+                new KeyValuePair<string, string>("u", "Unmount"),
+                new KeyValuePair<string, string>("r", "Refresh"),
+                new KeyValuePair<string, string>("F1", "Help"),
+                new KeyValuePair<string, string>("^Q", "Quit")
+            });
+
+            _ActivityHints = new HintBar("Activity", new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("Tab", "Drives"),
+                new KeyValuePair<string, string>("c", "Copy"),
+                new KeyValuePair<string, string>("r", "Refresh"),
+                new KeyValuePair<string, string>("F1", "Help"),
+                new KeyValuePair<string, string>("^Q", "Quit")
+            });
+
+            _DrivesHints.Focused = true;
+            _ActivityHints.Focused = false;
         }
 
         /// <summary>
@@ -70,43 +107,70 @@ namespace S3Drive.Tui
                     .WithPadding(0))
                 .Add("content", region => region
                     .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
-                    .Vertical(AxisConstraint.Stretch(HeaderHeight, LogHeight + HintsHeight, 1, FillMax))
+                    .Vertical(AxisConstraint.Stretch(HeaderHeight, ActivityHeight + 2 * HintHeight, 1, FillMax))
                     .WithBorder(BorderStyle.Line, "Drives")
+                    .WithPadding(0)
+                    .WithHorizontalPadding(1, 1))
+                .Add("driveshints", region => region
+                    .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
+                    .Vertical(AxisConstraint.FromEnd(ActivityHeight + HintHeight, HintHeight))
                     .WithPadding(0)
                     .WithHorizontalPadding(1, 1))
                 .Add("log", region => region
                     .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
-                    .Vertical(AxisConstraint.FromEnd(HintsHeight, LogHeight))
+                    .Vertical(AxisConstraint.FromEnd(HintHeight, ActivityHeight))
                     .WithBorder(BorderStyle.Line, "Activity")
                     .WithPadding(0)
                     .WithHorizontalPadding(1, 1))
-                .Add("hints", region => region
+                .Add("activityhints", region => region
                     .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
-                    .Vertical(AxisConstraint.FromEnd(0, HintsHeight))
-                    .WithPadding(0))
+                    .Vertical(AxisConstraint.FromEnd(0, HintHeight))
+                    .WithPadding(0)
+                    .WithHorizontalPadding(1, 1))
                 .Build();
 
             app.BindPane("header", _Header);
             app.BindPane("content", _Content);
+            app.Bind("driveshints", _DrivesHints);
             app.BindPane("log", _Log);
-            app.BindPane("hints", _Hints);
+            app.Bind("activityhints", _ActivityHints);
 
             RenderHeader();
-            RenderHints();
-
-            S3DriveLog.MessageLogged += OnLogMessage;
 
             app.Bind("ctrl+q", app.Quit);
+            app.Bind("tab", ToggleFocus);
             app.Bind("r", () => Launch(RefreshAsync));
-            app.Bind("c", () => Launch(AddDriveAsync));
-            app.Bind("e", () => Launch(EditDriveAsync));
-            app.Bind("d", () => Launch(DeleteDriveAsync));
-            app.Bind("m", () => Launch(MountDriveAsync));
-            app.Bind("u", () => Launch(UnmountDriveAsync));
             app.Bind("f1", () => Launch(HelpAsync));
+            app.Bind("c", OnC);
+            app.Bind("e", () => { if (!_ActivityFocused) Launch(EditDriveAsync); });
+            app.Bind("d", () => { if (!_ActivityFocused) Launch(DeleteDriveAsync); });
+            app.Bind("m", () => { if (!_ActivityFocused) Launch(MountDriveAsync); });
+            app.Bind("u", () => { if (!_ActivityFocused) Launch(UnmountDriveAsync); });
 
             Launch(RefreshAsync);
             StartStatusPolling(app);
+            StartLogTail(app);
+        }
+
+        private void ToggleFocus()
+        {
+            _ActivityFocused = !_ActivityFocused;
+            _DrivesHints.Focused = !_ActivityFocused;
+            _ActivityHints.Focused = _ActivityFocused;
+            _App?.Post(() => { });
+        }
+
+        private void OnC()
+        {
+            if (_ActivityFocused) Launch(CopyActivityAsync);
+            else Launch(AddDriveAsync);
+        }
+
+        private void RenderHeader()
+        {
+            _Header.Clear();
+            _Header.WriteLine(Constants.ProductName + " - " + Constants.Tagline);
+            _Header.WriteLine("v0.1.0 " + Constants.ReleaseLabel + "   " + Constants.RepositoryUrl);
         }
 
         private void StartStatusPolling(TuiApplication app)
@@ -129,24 +193,111 @@ namespace S3Drive.Tui
             });
         }
 
-        private void RenderHeader()
+        private void StartLogTail(TuiApplication app)
         {
-            _Header.Clear();
-            _Header.WriteLine(Constants.ProductName + " - " + Constants.Tagline);
-            _Header.WriteLine("v0.1.0 " + Constants.ReleaseLabel + "   " + Constants.RepositoryUrl);
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        TailOnce();
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    await Task.Delay(600).ConfigureAwait(false);
+                }
+            });
         }
 
-        private void RenderHints()
+        private void TailOnce()
         {
-            _Hints.Clear();
-            _Hints.WriteLine("[c]add  [e]edit  [d]delete  [m]mount  [u]unmount  [r]refresh  [F1]help  [Ctrl+Q]quit");
+            string directory = _Paths.LogDirectory;
+            if (!Directory.Exists(directory)) return;
+
+            string? newest = null;
+            DateTime newestTime = DateTime.MinValue;
+            foreach (string file in Directory.GetFiles(directory, "*.log"))
+            {
+                DateTime written = File.GetLastWriteTimeUtc(file);
+                if (written >= newestTime)
+                {
+                    newestTime = written;
+                    newest = file;
+                }
+            }
+
+            if (newest == null) return;
+
+            if (!string.Equals(newest, _LogPath, StringComparison.OrdinalIgnoreCase))
+            {
+                _LogPath = newest;
+                _LogPosition = 0;
+                _LogPartial = string.Empty;
+            }
+
+            using (FileStream stream = new FileStream(newest, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (stream.Length < _LogPosition)
+                {
+                    _LogPosition = 0;
+                    _LogPartial = string.Empty;
+                }
+
+                if (stream.Length == _LogPosition) return;
+
+                stream.Seek(_LogPosition, SeekOrigin.Begin);
+                int length = (int)(stream.Length - _LogPosition);
+                byte[] buffer = new byte[length];
+                int read = stream.Read(buffer, 0, length);
+                _LogPosition += read;
+
+                string chunk = _LogPartial + Encoding.UTF8.GetString(buffer, 0, read);
+                int lastNewline = chunk.LastIndexOf('\n');
+                if (lastNewline < 0)
+                {
+                    _LogPartial = chunk;
+                    return;
+                }
+
+                _LogPartial = chunk.Substring(lastNewline + 1);
+                string[] lines = chunk.Substring(0, lastNewline).Split('\n');
+                foreach (string raw in lines)
+                {
+                    string line = raw.TrimEnd('\r');
+                    if (line.Length > 0) AppendActivity(line);
+                }
+            }
         }
 
-        private void OnLogMessage(string severity, string message)
+        private void AppendActivity(string line)
         {
-            TuiApplication? app = _App;
-            if (app == null) return;
-            app.Post(() => _Log.WriteLine(severity + "  " + message));
+            lock (_ActivitySync)
+            {
+                _ActivityLines.Add(line);
+                if (_ActivityLines.Count > MaxActivityLines) _ActivityLines.RemoveAt(0);
+            }
+
+            _App?.Post(() => _Log.WriteLine(line));
+        }
+
+        private Task CopyActivityAsync()
+        {
+            string text;
+            int count;
+            lock (_ActivitySync)
+            {
+                text = string.Join(Environment.NewLine, _ActivityLines);
+                count = _ActivityLines.Count;
+            }
+
+            bool copied = Clipboard.TryCopy(text);
+            AppendActivity(copied
+                ? "[copied " + count + " activity line(s) to the clipboard]"
+                : "[clipboard copy failed]");
+            return Task.CompletedTask;
         }
 
         private async Task RefreshAsync()
@@ -259,12 +410,13 @@ namespace S3Drive.Tui
             TuiApplication app = RequireApp();
             string help = "S3Drive TUI\n\n"
                 + "The tray agent owns all mounts and keeps running when this window is closed.\n\n"
-                + "c  add a drive        e  edit        d  delete\n"
-                + "m  mount              u  unmount\n"
-                + "r  refresh            F1 help        Ctrl+Q quit\n\n"
-                + "One drive maps to one bucket. Works with AWS S3 and S3-compatible endpoints\n"
-                + "(Less3, Ceph, MinIO, and others). To share a mounted drive on the network,\n"
-                + "use Windows Explorer (right-click the drive, Properties, Sharing).";
+                + "Tab                 switch focus between the Drives and Activity panes\n"
+                + "Drives:  c add   e edit   d delete   m mount   u unmount\n"
+                + "Activity: c copy the activity log to the clipboard\n"
+                + "r refresh    F1 help    Ctrl+Q quit\n\n"
+                + "One drive maps to one bucket; configuring a drive mounts it automatically.\n"
+                + "Works with AWS S3 and S3-compatible endpoints (Less3, Ceph, MinIO, and others).\n"
+                + "To share a mounted drive on the network, use Windows Explorer.";
             await app.ShowAsync(new MessageModal("Help", help, new List<string> { "OK" })).ConfigureAwait(false);
         }
 
