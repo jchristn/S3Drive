@@ -137,26 +137,52 @@ namespace S3Drive.Tui
         public override void Render(ISurface surface)
         {
             Size size = surface.Size;
-            int width = Math.Min(76, size.Width - 4);
-            int height = Math.Min(28, size.Height - 4);
+            int width = Math.Min(80, size.Width - 4);
+
+            // Size to the form's content (plus borders, top padding, and the error line) so every
+            // field shows when the terminal is tall enough; otherwise fill the terminal and scroll.
+            int desiredHeight = _Form.ContentHeight + 5;
+            int height = Math.Min(size.Height - 2, Math.Max(20, desiredHeight));
             if (width < 8 || height < 8) return;
 
             int x = (size.Width - width) / 2;
             int y = (size.Height - height) / 2;
 
-            surface.DrawBox(new Rect(x, y, width, height), CellStyle.Default, _Title + "  (Enter=save, Esc=cancel)");
+            surface.DrawBox(new Rect(x, y, width, height), CellStyle.Default, _Title + "  (Tab moves, Enter saves, Esc cancels)");
 
             int innerWidth = width - 4;
-            int innerHeight = height - 5;
-            CellBuffer buffer = new CellBuffer(innerWidth, innerHeight);
+            int viewportHeight = height - 5;
+
+            // Render the whole form into an off-screen buffer, then blit a vertical window that
+            // follows the focused field so every field is reachable even when the form is taller
+            // than the modal.
+            int contentHeight = Math.Max(viewportHeight, _Form.ContentHeight);
+            CellBuffer buffer = new CellBuffer(innerWidth, contentHeight);
             _Form.Render(new BufferSurface(buffer));
 
-            for (int row = 0; row < innerHeight; row++)
+            int scrollY = 0;
+            if (_Form.TryGetFocusRect(out Rect focus))
+            {
+                if (focus.Bottom > viewportHeight) scrollY = focus.Bottom - viewportHeight;
+                if (focus.Top < scrollY) scrollY = focus.Top;
+            }
+
+            scrollY = Math.Clamp(scrollY, 0, Math.Max(0, contentHeight - viewportHeight));
+
+            for (int row = 0; row < viewportHeight; row++)
             {
                 for (int column = 0; column < innerWidth; column++)
                 {
-                    surface.Set(x + 2 + column, y + 2 + row, buffer.Get(column, row));
+                    surface.Set(x + 2 + column, y + 2 + row, buffer.Get(column, row + scrollY));
                 }
+            }
+
+            if (contentHeight > viewportHeight)
+            {
+                string indicator = scrollY > 0
+                    ? (scrollY + viewportHeight < contentHeight ? "▲▼ more" : "▲ more")
+                    : "▼ more";
+                surface.DrawText(x + width - indicator.Length - 2, y, indicator, CellStyle.Default.WithForeground(Color.FromPalette(8)));
             }
 
             if (_Error != null)
