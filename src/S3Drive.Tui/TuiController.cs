@@ -25,7 +25,7 @@ namespace S3Drive.Tui
     internal sealed class TuiController
     {
         private const int HeaderHeight = 2;
-        private const int LogHeight = 8;
+        private const int LogHeight = 14;
         private const int HintsHeight = 1;
         private const int FillMax = 1_000_000;
 
