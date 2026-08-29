@@ -126,7 +126,13 @@ test/
   Test.Automated/            deterministic Core tests
 ```
 
-See [`S3DRIVE_PLAN.md`](S3DRIVE_PLAN.md) for the full design.
+## Documentation
+
+- [`S3DRIVE_PLAN.md`](S3DRIVE_PLAN.md) — the full design and implementation plan.
+- [`CONCURRENCY_AND_LOCKING.md`](CONCURRENCY_AND_LOCKING.md) — exactly how S3Drive handles
+  concurrent access and locking, and the boundaries of its guarantees.
+- [`S3_OPERATIONS.md`](S3_OPERATIONS.md) — how each filesystem operation maps to S3 requests
+  (enumeration, traversal, reads, writes, updates, rename) and where the limitations are.
 
 ## Third-party components
 
