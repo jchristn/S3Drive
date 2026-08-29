@@ -52,6 +52,10 @@ only choosing **Exit** from the tray does.
 
 - Windows 10/11 (x64).
 - The **Dokany** driver installed (S3Drive uses the managed Dokan.NET wrapper over it).
+  Download and install it from the official releases page:
+  <https://github.com/dokan-dev/dokany/releases>. Dokany is a separate, independently-licensed
+  prerequisite (dual **LGPL-2.1 / MIT**, also offered commercially) — it is not bundled with
+  S3Drive.
 - The **.NET 8 Desktop Runtime** to run, or the **.NET 8 SDK** to build.
 - **Administrator privileges** are required to create or remove SMB shares (network re-sharing
   only).
@@ -134,7 +138,7 @@ from <https://github.com/dokan-dev/dokany>.
 
 | Component | Used for | License |
 |---|---|---|
-| [Dokany](https://github.com/dokan-dev/dokany) (kernel driver, separate install) | User-mode filesystem driver | Dual LGPL-2.1 / MIT (also offered commercially) |
+| [Dokany](https://github.com/dokan-dev/dokany/releases) (kernel driver, separate install) | User-mode filesystem driver | Dual LGPL-2.1 / MIT (also offered commercially) |
 | [DokanNet](https://github.com/dokan-dev/dokan-dotnet) | Managed Dokan wrapper | MIT |
 | [Blobject](https://github.com/jchristn/blobject) (`Blobject.Core`, `Blobject.AmazonS3`) | S3 / S3-compatible storage | MIT |
 | [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) (`AWSSDK.S3`, via Blobject) | S3 protocol client | Apache-2.0 |
