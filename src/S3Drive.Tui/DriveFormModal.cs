@@ -16,6 +16,7 @@ namespace S3Drive.Tui
     {
         private readonly string _Title;
         private readonly Form _Form = new Form();
+        private readonly List<TextField?> _TextByIndex;
 
         private readonly TextField _Name = new TextField();
         private readonly RadioGroup _Provider = new RadioGroup(new string[] { "AwsS3", "S3Compatible" });
@@ -73,6 +74,27 @@ namespace S3Drive.Tui
             _Form.Add("Share name", _ShareName);
             _Form.Add("Share access", _ShareAccess);
             _Form.Add("Allowed principals (comma-separated)", _AllowedPrincipals);
+
+            // Maps each form-field index to its text field (null for non-text fields), so a
+            // paste can be inserted into the focused field. Order must match the Add calls above.
+            _TextByIndex = new List<TextField?>
+            {
+                _Name,          // 0
+                null,           // 1  Provider (radio)
+                _ServiceUrl,    // 2
+                _Region,        // 3
+                _Bucket,        // 4
+                _AccessKey,     // 5
+                _Secret,        // 6
+                null,           // 7  Use SSL (checkbox)
+                null,           // 8  Path-style (checkbox)
+                _DriveLetter,   // 9
+                null,           // 10 Auto-mount (checkbox)
+                null,           // 11 Enable share (checkbox)
+                _ShareName,     // 12
+                null,           // 13 Share access (radio)
+                _AllowedPrincipals // 14
+            };
         }
 
         /// <inheritdoc />
@@ -91,6 +113,23 @@ namespace S3Drive.Tui
             }
 
             return _Form.HandleKey(key);
+        }
+
+        /// <inheritdoc />
+        public override bool HandlePaste(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+
+            int index = _Form.FocusedIndex;
+            if (index < 0 || index >= _TextByIndex.Count) return false;
+
+            TextField? field = _TextByIndex[index];
+            if (field == null) return false;
+
+            // Form fields are single-line; strip any newlines a paste may carry so a pasted
+            // access key or secret stays on one line.
+            field.Insert(text.Replace("\r", string.Empty).Replace("\n", string.Empty));
+            return true;
         }
 
         /// <inheritdoc />
