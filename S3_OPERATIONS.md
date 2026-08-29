@@ -25,13 +25,13 @@ objects at once — cleaning up after a directory rename — `BlobS3Store` also 
 | Enumerate a directory (`FindFiles`) | `IS3Store.ListAsync(prefix)` | `EnumerateAsync(EnumerationFilter{Prefix})` | `ListObjectsV2` (by prefix) |
 | Recursive enumerate (rename/delete) | `IS3Store.ListAllKeysAsync(prefix)` | `EnumerateAsync(EnumerationFilter{Prefix})` | `ListObjectsV2` (by prefix) |
 | Attributes (`GetFileInformation`) | `IS3Store.HeadAsync(key)` | `GetMetadataAsync(key)` | `HeadObject` |
-| Existence check | `IS3Store.ExistsAsync(key)` | `ExistsAsync(key)` | `HeadObject` / list |
+| Directory existence | cached `HeadAsync(marker)`, else listing | `GetMetadataAsync(key + "/")`, else `EnumerateAsync` | `HeadObject` (marker) / `ListObjectsV2` |
 | Read (`ReadFile`) | stage via `GetToFileAsync`, then read locally | `GetAsync(key)` | `GetObject` (whole object) |
 | Write (`WriteFile`) → persist on close | stage locally, then `PutFromFileAsync` | `WriteAsync(key, type, length, stream)` | `PutObject` (multipart for large) |
 | Create new object | `PutAsync` / staged then `PutFromFileAsync` | `WriteAsync(...)` | `PutObject` |
-| Delete (`DeleteFile`/`DeleteDirectory`) | `IS3Store.DeleteAsync(key)` | `DeleteAsync(key)` | `DeleteObject` |
+| Delete (`DeleteFile`/`DeleteDirectory`) | `IS3Store.DeleteAsync(key)` | AWS SDK `DeleteObjectAsync` (direct, no HEAD guard) | `DeleteObject` |
 | Delete many (directory rename cleanup) | `IS3Store.DeleteManyAsync(keys)` | AWS SDK `DeleteObjectsAsync` (direct) | `DeleteObjects` (up to 1000/request) |
-| Rename/move file (`MoveFile`) | `CopyAsync` then `DeleteAsync` | `GetAsync` + `WriteAsync`, then `DeleteAsync` | `GetObject` + `PutObject` + `DeleteObject` |
+| Rename/move file (`MoveFile`) | `CopyAsync` then `DeleteAsync` | `GetAsync` + `WriteAsync`, then `DeleteObjectAsync` | `GetObject` + `PutObject` + `DeleteObject` |
 | Rename/move directory (`MoveFile`) | `CopyAsync` per key, then `DeleteManyAsync` | `GetAsync`+`WriteAsync` per key, then `DeleteObjectsAsync` | `GetObject`+`PutObject` per key + batched `DeleteObjects` |
 | Create directory (`CreateDirectory`) | write a `prefix/` marker | `WriteAsync(prefix + "/", type, empty)` | `PutObject` (zero bytes) |
 | Connectivity check | `ValidateConnectivityAsync` | `ValidateConnectivity()` | provider probe |
@@ -73,16 +73,25 @@ prefix.
 
 **Traversal.** There is no tree to walk. Each directory query is an independent prefix listing.
 Results are cached briefly by `MetadataCache` (keyed by prefix) so repeated Explorer refreshes of the
-same folder do not re-list the bucket every time.
+same folder do not re-list the bucket every time. A listing also **seeds the per-key attribute
+cache**: because each listed key already carries its size and last-modified time, those are stored
+as cached HEAD entries, so a `GetFileInformation` on a file you just listed is served from cache
+without a separate `HeadObject`.
+
+**Directory existence.** Whether a path is a directory is decided by `DirectoryExists`: it first
+checks for the `prefix/` marker through the cached HEAD path (both present and absent results are
+cached), and only if there is no marker does it fall back to a listing to detect an *implicit*
+directory (a prefix that has children but no marker object).
 
 ## Attributes and existence
 
-`GetFileInformation` and existence checks use `HeadObject` via `HeadAsync`/`ExistsAsync`. A HEAD
-returns the object's size, last-modified time, and ETag, which become the file's length and
-timestamps. Windows-specific attributes have no S3 equivalent, so files report a plain "normal"
-attribute and folders report "directory." When a file is open for write and has local staged
-content, `GetFileInformation` reports the **staging file's** current length rather than the last
-HEAD, so a program that writes and then stats the same handle sees the new size.
+`GetFileInformation` uses `HeadObject` via `HeadAsync`, served from the metadata cache when possible
+(including entries seeded by a recent listing, above). A HEAD returns the object's size,
+last-modified time, and ETag, which become the file's length and timestamps. Windows-specific
+attributes have no S3 equivalent, so files report a plain "normal" attribute and folders report
+"directory." When a file is open for write and has local staged content, `GetFileInformation`
+reports the **staging file's** current length rather than the last HEAD, so a program that writes
+and then stats the same handle sees the new size.
 
 ## Reads
 
@@ -128,8 +137,11 @@ object on close. Creating a directory writes the `prefix/` marker.
 Deletion follows Dokan's two-step model. `DeleteFile`/`DeleteDirectory` only *validate* that the
 delete is allowed (the file exists; the directory is empty) and mark the handle; the actual
 `DeleteObject` happens in `Cleanup` when the handle closes with deletion pending. `DeleteAsync`
-checks existence first and then issues `DeleteObject`, so deleting a missing object is harmless.
-Directory deletion refuses a non-empty directory (`DirectoryNotEmpty`) by inspecting a listing.
+issues `DeleteObject` directly through the AWS SDK **without a preceding HEAD** — one round trip
+instead of two. On AWS, `DeleteObject` is idempotent (deleting a missing key succeeds); some
+S3-compatible endpoints (for example Less3) instead return `NoSuchKey`, which `DeleteAsync` catches
+and treats as success, so deleting a missing object is harmless on either. Directory deletion
+refuses a non-empty directory (`DirectoryNotEmpty`) by inspecting a listing.
 
 Note that Dokan (like Windows) deletes a multi-file selection one handle at a time, so a bulk
 Explorer delete arrives as many independent `DeleteFile` → `Cleanup` calls, each a single
@@ -221,8 +233,9 @@ cache (see limitations), not from S3 itself.
 - **Limited metadata.** Only size and last-modified are represented. Windows attributes, creation
   time as distinct from modification time, ACLs, and alternate streams are not persisted.
 - **Metadata-cache staleness.** Directory listings and HEADs are cached for `MetadataCacheSeconds`
-  and invalidated on local changes only. An external writer's changes may not appear until the TTL
-  expires; lower the value (or set it to 0) when concurrent external writers are expected.
+  and invalidated on local changes only. A listing additionally seeds the per-key HEAD cache, so an
+  external writer's changes to a file's size or timestamp may not appear until the TTL expires; lower
+  the value (or set it to 0) when concurrent external writers are expected.
 - **Key case sensitivity.** S3 keys are case-sensitive; the Windows filesystem view is
   case-insensitive. Two objects whose keys differ only in case cannot be distinguished through the
   mounted drive.

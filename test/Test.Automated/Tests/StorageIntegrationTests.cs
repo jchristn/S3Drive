@@ -78,6 +78,11 @@ namespace Test.Automated.Tests
 
                     await store.DeleteAsync(key, token);
                     Assert.False(await store.ExistsAsync(key, token));
+
+                    // Deleting an already-absent key must be tolerated (no HEAD guard; some
+                    // endpoints return NoSuchKey, which is treated as success).
+                    await store.DeleteAsync(key, token);
+
                     await store.DeleteAsync(copyKey, token);
                 }
             });

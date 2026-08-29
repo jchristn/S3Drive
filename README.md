@@ -104,12 +104,14 @@ Windows handles it, which keeps share permissions and access control in one fami
 
 ## How files map to objects
 
-S3Drive treats **one file as one object**. Reads are served with ranged GETs. Because S3
-objects are immutable and do not support partial writes, an open-for-write file is staged to a
-local temporary file and written back as a whole object when it is closed. Byte-range locks are
-not used; instead, access to each object is serialized with a coarse named lock so cross-thread
-access can never corrupt the backing data. The priority is consistency and coherency, even at
-the cost of concurrent access to the same file.
+S3Drive treats **one file as one object**. Because S3 objects are retrieved whole (no ranged
+reads), opening a file downloads the object once to a local staging file and every read is then
+served from that local copy. Likewise, because S3 objects are immutable and do not support
+partial writes, an open-for-write file is staged locally and written back as a whole object when
+it is closed. Byte-range locks are not used; instead, access to each object is serialized with a
+coarse named lock so cross-thread access can never corrupt the backing data. The priority is
+consistency and coherency, even at the cost of concurrent access to the same file. See
+[`S3_OPERATIONS.md`](S3_OPERATIONS.md) for the full per-operation mapping.
 
 ## Project layout
 

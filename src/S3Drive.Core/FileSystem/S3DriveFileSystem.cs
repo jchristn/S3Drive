@@ -647,7 +647,10 @@ namespace S3Drive.Core.FileSystem
             if (string.IsNullOrEmpty(key)) return true;
             string prefix = key + "/";
 
-            if (RunExists(prefix)) return true;
+            // Check the directory marker via the cached HEAD path (both present and absent results
+            // are cached) rather than an uncached existence probe, then fall back to a listing to
+            // detect an implicit directory: a prefix that has children but no marker object.
+            if (RunHead(prefix) != null) return true;
             return RunList(prefix).Count > 0;
         }
 
@@ -671,12 +674,16 @@ namespace S3Drive.Core.FileSystem
             if (_Cache.TryGetListing(prefix, out IReadOnlyList<S3Entry>? cached) && cached != null) return cached;
             IReadOnlyList<S3Entry> entries = _Store.ListAsync(prefix, _Token).GetAwaiter().GetResult();
             _Cache.SetListing(prefix, entries);
-            return entries;
-        }
 
-        private bool RunExists(string key)
-        {
-            return _Store.ExistsAsync(key, _Token).GetAwaiter().GetResult();
+            // A listing already carries each file's size and last-modified time, so seed the
+            // per-key attribute cache from it. This lets a subsequent GetFileInformation on a listed
+            // child be served without a separate HeadObject request.
+            foreach (S3Entry entry in entries)
+            {
+                if (entry.EntryType == S3EntryTypeEnum.File) _Cache.SetHead(entry.Key, entry);
+            }
+
+            return entries;
         }
 
         private void RunGetToFile(string key, string path)

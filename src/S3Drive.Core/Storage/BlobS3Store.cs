@@ -190,9 +190,24 @@ namespace S3Drive.Core.Storage
         {
             if (key == null) throw new ArgumentNullException(nameof(key));
 
-            bool exists = await _Client.ExistsAsync(key, token).ConfigureAwait(false);
-            if (!exists) return;
-            await _Client.DeleteAsync(key, token).ConfigureAwait(false);
+            // Issue the delete directly through the AWS SDK, without a preceding HeadObject. On AWS
+            // S3 DeleteObject is idempotent; some S3-compatible endpoints (for example Less3) instead
+            // return NoSuchKey for an absent key, which is treated as success here. Either way the
+            // extra existence round trip a guarded delete would incur is avoided.
+            DeleteObjectRequest request = new DeleteObjectRequest();
+            request.BucketName = _Bucket;
+            request.Key = key;
+
+            try
+            {
+                await _S3Client.DeleteObjectAsync(request, token).ConfigureAwait(false);
+            }
+            catch (AmazonS3Exception exception) when (
+                exception.StatusCode == System.Net.HttpStatusCode.NotFound
+                || string.Equals(exception.ErrorCode, "NoSuchKey", StringComparison.Ordinal))
+            {
+                // Deleting an object that does not exist is not an error.
+            }
         }
 
         /// <inheritdoc />
