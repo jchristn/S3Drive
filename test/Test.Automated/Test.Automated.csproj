@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Test.Automated - console harness for deterministic S3Drive.Core logic (key/path mapping,
+    config round-trip, metadata-cache invalidation, lock serialization). Test cases are added
+    with the Core foundation phase.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\S3Drive.Core\S3Drive.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DokanNet" Version="2.3.0.3" />
+  </ItemGroup>
+
+</Project>

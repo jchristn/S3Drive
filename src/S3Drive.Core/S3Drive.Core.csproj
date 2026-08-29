@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk"><!--
+    S3Drive.Core - all logic: configuration, logging, storage (Blobject), filesystem/object
+    semantics (Dokan), mount management, CIFS/SMB re-sharing, and coarse per-object locking.
+    Shared build settings come from the root Directory.Build.props.
+
+    NuGet packages (DokanNet, Blobject.AmazonS3, Padlock, SyslogLogging, PrettyId) are pinned
+    during the Phase 1 spike once their exact versions and APIs are verified (see
+    S3DRIVE_PLAN.md sections 3.1 and 13).
+  -->
+
+
+  <ItemGroup>
+    <PackageReference Include="Blobject.AmazonS3" Version="5.0.21" />
+    <PackageReference Include="DokanNet" Version="2.3.0.3" />
+    <PackageReference Include="Padlock" Version="1.0.4" />
+    <PackageReference Include="PrettyId" Version="2.0.1" />
+    <PackageReference Include="SyslogLogging" Version="2.2.2" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,26 @@
+<Project>
+
+  <!--
+    Shared build settings for every S3Drive project (src/ and test/).
+    Conventions per C:\code\Agents\requirements\CODE_STYLE.md:
+      - explicit usings inside the namespace block (ImplicitUsings disabled)
+      - nullable reference types enabled
+      - XML documentation generated (public API must be documented in libraries)
+      - warnings treated as errors
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Authors>Joel Christner</Authors>
+    <Company>Joel Christner</Company>
+    <Product>S3Drive</Product>
+    <Copyright>(c) 2026 Joel Christner</Copyright>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>

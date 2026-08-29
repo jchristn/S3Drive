@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    S3Drive.Agent - the always-on system tray agent that owns all mounts and network shares.
+    Code-only Avalonia (no XAML); the tray icon is embedded as a plain resource and loaded from
+    a manifest stream, so Avalonia XAML compilation is disabled.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+    <EnableAvaloniaXamlCompilation>false</EnableAvaloniaXamlCompilation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo.ico" LogicalName="S3Drive.Agent.logo.ico" />
+    <EmbeddedResource Include="Assets\logo.png" LogicalName="S3Drive.Agent.logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\S3Drive.Core\S3Drive.Core.csproj" />
+  </ItemGroup>
+
+</Project>

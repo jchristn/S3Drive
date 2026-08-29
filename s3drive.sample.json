@@ -1,0 +1,52 @@
+{
+  "CreatedUtc": "2026-01-01T00:00:00Z",
+  "Logging": {
+    "ConsoleLogging": false,
+    "FileLogging": true
+  },
+  "MetadataCacheSeconds": 5,
+  "MultipartThresholdBytes": 16777216,
+  "Drives": [
+    {
+      "Id": "drv_example_aws",
+      "Name": "Amazon S3 example",
+      "Provider": "AwsS3",
+      "Region": "us-east-1",
+      "Bucket": "your-bucket-name",
+      "AccessKey": "AKIAEXAMPLE",
+      "SecretKeyEncrypted": "set-via-the-TUI-do-not-store-plaintext-here",
+      "UsePathStyle": false,
+      "UseSsl": true,
+      "DriveLetter": "S:",
+      "AutoMount": true,
+      "Share": {
+        "Enabled": false,
+        "ShareName": "S3Drive-AWS",
+        "Access": "ReadOnly",
+        "AllowedPrincipals": [],
+        "Description": "Amazon S3 example over SMB"
+      }
+    },
+    {
+      "Id": "drv_example_minio",
+      "Name": "S3-compatible example (MinIO / Ceph / Less3)",
+      "Provider": "S3Compatible",
+      "ServiceUrl": "http://127.0.0.1:9000",
+      "UseSsl": false,
+      "Region": "us-east-1",
+      "Bucket": "scratch",
+      "AccessKey": "minioadmin",
+      "SecretKeyEncrypted": "set-via-the-TUI-do-not-store-plaintext-here",
+      "UsePathStyle": true,
+      "DriveLetter": "T:",
+      "AutoMount": false,
+      "Share": {
+        "Enabled": false,
+        "ShareName": "S3Drive-Lab",
+        "Access": "ReadOnly",
+        "AllowedPrincipals": [],
+        "Description": "S3-compatible lab bucket over SMB"
+      }
+    }
+  ]
+}

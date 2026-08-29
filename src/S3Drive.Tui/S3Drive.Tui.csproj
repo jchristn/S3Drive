@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    S3Drive.Tui - the TUIKit configuration and monitoring console. The TUIKit package is
+    pinned during the Phase 1 spike (see S3DRIVE_PLAN.md 3.1 and 13).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\S3Drive.Core\S3Drive.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUIKit" Version="0.8.4" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,36 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.packages/
+
+# Test / coverage
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+coverage/
+
+# Logs and local state (never commit ~/.s3drive contents that may land here)
+*.log
+logs/
+crash-logs/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini

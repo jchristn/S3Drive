@@ -1,0 +1,135 @@
+<div align="center">
+
+<img src="assets/logo.png" alt="S3Drive logo" width="128" height="128" />
+
+# S3Drive
+
+**v0.1.0 Alpha** &nbsp;·&nbsp; © 2026 Joel Christner
+
+Your S3 bucket as a local Windows drive.
+
+</div>
+
+---
+
+> **Alpha software.** This is an early release. Configuration formats, behavior, and
+> interfaces can and will change between `0.1.x` versions. Do not point it at data you cannot
+> afford to lose without testing first.
+
+## What it is
+
+S3Drive mounts an S3 bucket as a local Windows drive letter using
+[Dokan](https://github.com/dokan-dev/dokan-dotnet), and can optionally re-expose that drive on
+the network over CIFS/SMB. It works with **Amazon S3** and with **S3-compatible endpoints**
+such as [Less3](https://github.com/jchristn/less3), Ceph, MinIO, and others — including the
+extra settings those endpoints need (custom endpoint URL, SSL on/off, access/secret keys, and
+virtual-hosted vs path-style addressing).
+
+Two components:
+
+- A **tray agent** that always runs. It owns the actual mounts and network shares and does the
+  work.
+- A **terminal UI (TUI)** for configuring connections and monitoring the agent.
+
+The agent is the always-on part. The system keeps running — drives stay mounted and shares
+stay available — **whether or not the TUI is open**. Closing the TUI does not unmount anything;
+only choosing **Exit** from the tray does.
+
+## Features
+
+- **Amazon S3 and S3-compatible endpoints** (Less3, Ceph, MinIO, and others), with endpoint
+  URL, SSL toggle, keys, region, and path-style vs virtual-hosted addressing.
+- **One drive = one bucket.** A mounted drive's root maps to a single bucket; keys are files
+  and `/`-delimited prefixes are folders.
+- **Multiple simultaneous mounts.** Each configured connection can mount its bucket to its own
+  drive letter at the same time.
+- **Network re-sharing (CIFS/SMB).** Any mounted drive can be re-exported as an SMB share so
+  other machines on the network can connect. Off by default.
+- **Menu-driven TUI** for configuration and live monitoring, plus a **system tray agent** with
+  About, mount/unmount, and share/unshare controls.
+
+## Requirements
+
+- Windows 10/11 (x64).
+- The **Dokany** driver installed (S3Drive uses the managed Dokan.NET wrapper over it).
+- The **.NET 8 Desktop Runtime** to run, or the **.NET 8 SDK** to build.
+- **Administrator privileges** are required to create or remove SMB shares (network re-sharing
+  only).
+
+## Getting started
+
+From the repository root:
+
+```bat
+go.bat
+```
+
+`go.bat` builds the solution and launches the TUI. On startup the TUI checks whether the tray
+agent is running and starts it if it isn't. From the TUI you can add a connection, then mount
+it; from the tray you can mount/unmount, share/unshare, open the TUI, or exit.
+
+## Configuration
+
+Configuration lives in `%USERPROFILE%\.s3drive\s3drive.json`. A documented example is in
+[`s3drive.sample.json`](s3drive.sample.json). Alongside it, S3Drive keeps:
+
+```
+~/.s3drive/
+  s3drive.json     connection profiles and global settings
+  logs/            application logs
+  crash-logs/      crash reports
+  state/           agent lock, live status, and the TUI-to-agent command channel
+  cache/           per-mount write staging
+```
+
+Secret keys are **encrypted at rest** and are never written in plaintext or logged; the TUI
+masks them.
+
+## Network sharing (CIFS/SMB)
+
+Because a mounted drive is a normal Windows volume, S3Drive can re-share it over SMB. Enable
+sharing per connection, give the share a name, choose read-only or read-write, and list the
+Windows accounts or groups allowed to connect.
+
+A few things to know:
+
+- Creating and removing shares requires **administrator privileges**.
+- Sharing is **off by default**, defaults to **read-only**, and never grants `Everyone`
+  access implicitly.
+- Re-sharing exposes cloud-backed data on your local network. Only enable it for endpoints and
+  buckets you intend to make reachable, and scope the allowed accounts accordingly.
+
+## How files map to objects
+
+S3Drive treats **one file as one object**. Reads are served with ranged GETs. Because S3
+objects are immutable and do not support partial writes, an open-for-write file is staged to a
+local temporary file and written back as a whole object when it is closed. Byte-range locks are
+not used; instead, access to each object is serialized with a coarse named lock so cross-thread
+access can never corrupt the backing data. The priority is consistency and coherency, even at
+the cost of concurrent access to the same file.
+
+## Project layout
+
+```
+S3Drive.sln
+Directory.Build.props        shared build settings (net8.0, version 0.1.0, conventions)
+go.bat                       build the solution and launch the TUI
+assets/                      logo.png, logo.ico
+src/
+  S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, sharing, locks
+  S3Drive.Agent/             Avalonia tray agent (owns mounts and shares)
+  S3Drive.Tui/               TUIKit configuration and monitoring console
+test/
+  Test.Automated/            deterministic Core tests
+```
+
+See [`S3DRIVE_PLAN.md`](S3DRIVE_PLAN.md) for the full design.
+
+## License
+
+MIT — see [`LICENSE.md`](LICENSE.md).
+
+## Links
+
+- Repository: <https://github.com/jchristn/S3Drive>
+- Dokan.NET: <https://github.com/dokan-dev/dokan-dotnet>
