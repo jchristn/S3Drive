@@ -3,6 +3,7 @@ namespace S3Drive.Tui
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Reflection;
     using System.Text;
     using System.Threading;
     using System.Threading.Tasks;
@@ -27,7 +28,6 @@ namespace S3Drive.Tui
     /// </summary>
     internal sealed class TuiController
     {
-        private const int HeaderHeight = 2;
         private const int ActivityHeight = 14;
         private const int HintHeight = 1;
         private const int FillMax = 1_000_000;
@@ -36,10 +36,10 @@ namespace S3Drive.Tui
         private readonly S3DrivePaths _Paths;
         private readonly SettingsManager _SettingsManager;
         private readonly CredentialProtector _Protector;
+        private readonly bool _ShowSplash;
         private readonly object _ActivitySync = new object();
         private readonly List<string> _ActivityLines = new List<string>();
 
-        private readonly Pane _Header = new Pane("header");
         private readonly Pane _Content = new Pane("content");
         private readonly Pane _Log = new Pane("log");
         private readonly HintBar _DrivesHints;
@@ -59,11 +59,13 @@ namespace S3Drive.Tui
         /// Initializes a new controller.
         /// </summary>
         /// <param name="paths">The path resolver.</param>
-        public TuiController(S3DrivePaths paths)
+        /// <param name="showSplash">Whether to show the startup splash screen. Defaults to true.</param>
+        public TuiController(S3DrivePaths paths, bool showSplash = true)
         {
             _Paths = paths;
             _SettingsManager = new SettingsManager(paths);
             _Protector = new CredentialProtector(paths.MachineKeyFile);
+            _ShowSplash = showSplash;
 
             _DrivesHints = new HintBar("Drives", new List<KeyValuePair<string, string>>
             {
@@ -100,14 +102,20 @@ namespace S3Drive.Tui
             _App = app;
             app.Theme = Theme.Dark;
 
+            // The header shows the "s3drive" ASCII-art wordmark on the left with the tagline and link
+            // to its right, then a blank separator row before the Drives pane beneath it.
+            string[] logoRows = S3DriveBanner.WordmarkLines();
+            HeaderBanner header = new HeaderBanner(logoRows, Constants.Tagline, Constants.RepositoryUrl);
+            int headerHeight = logoRows.Length + 1;
+
             app.Layout = Layout.Create()
                 .Add("header", region => region
                     .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
-                    .Vertical(AxisConstraint.Fixed(0, HeaderHeight))
+                    .Vertical(AxisConstraint.Fixed(0, headerHeight))
                     .WithPadding(0))
                 .Add("content", region => region
                     .Horizontal(AxisConstraint.Stretch(0, 0, 1, FillMax))
-                    .Vertical(AxisConstraint.Stretch(HeaderHeight, ActivityHeight + 2 * HintHeight, 1, FillMax))
+                    .Vertical(AxisConstraint.Stretch(headerHeight, ActivityHeight + 2 * HintHeight, 1, FillMax))
                     .WithBorder(BorderStyle.Line, "Drives")
                     .WithPadding(0)
                     .WithHorizontalPadding(1, 1))
@@ -129,13 +137,11 @@ namespace S3Drive.Tui
                     .WithHorizontalPadding(1, 1))
                 .Build();
 
-            app.BindPane("header", _Header);
+            app.Bind("header", header);
             app.BindPane("content", _Content);
             app.Bind("driveshints", _DrivesHints);
             app.BindPane("log", _Log);
             app.Bind("activityhints", _ActivityHints);
-
-            RenderHeader();
 
             app.Bind("ctrl+q", app.Quit);
             app.Bind("tab", ToggleFocus);
@@ -147,9 +153,25 @@ namespace S3Drive.Tui
             app.Bind("m", () => { if (!_ActivityFocused) Launch(MountDriveAsync); });
             app.Bind("u", () => { if (!_ActivityFocused) Launch(UnmountDriveAsync); });
 
-            Launch(RefreshAsync);
+            Launch(StartAsync);
             StartStatusPolling(app);
             StartLogTail(app);
+        }
+
+        private async Task StartAsync()
+        {
+            if (_ShowSplash)
+            {
+                Version? assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+                string version = assemblyVersion != null
+                    ? assemblyVersion.Major + "." + assemblyVersion.Minor + "." + assemblyVersion.Build
+                    : "0.1.0";
+
+                SplashModal splash = new SplashModal(Constants.ProductName, S3DriveBanner.SplashLines(version));
+                await RequireApp().ShowAsync(splash).ConfigureAwait(false);
+            }
+
+            await RefreshAsync().ConfigureAwait(false);
         }
 
         private void ToggleFocus()
@@ -164,13 +186,6 @@ namespace S3Drive.Tui
         {
             if (_ActivityFocused) Launch(CopyActivityAsync);
             else Launch(AddDriveAsync);
-        }
-
-        private void RenderHeader()
-        {
-            _Header.Clear();
-            _Header.WriteLine(Constants.ProductName + " - " + Constants.Tagline);
-            _Header.WriteLine("v0.1.0 " + Constants.ReleaseLabel + "   " + Constants.RepositoryUrl);
         }
 
         private void StartStatusPolling(TuiApplication app)

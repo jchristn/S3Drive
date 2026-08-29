@@ -10,7 +10,7 @@ namespace S3Drive.Tui
     {
         internal static async Task<int> Main(string[] args)
         {
-            _ = args;
+            bool showSplash = !HasFlag(args, "--no-splash");
 
             S3DrivePaths paths = new S3DrivePaths();
             try
@@ -27,7 +27,7 @@ namespace S3Drive.Tui
 
             try
             {
-                TuiController controller = new TuiController(paths);
+                TuiController controller = new TuiController(paths, showSplash);
                 await TuiApp.RunAsync(controller.Configure).ConfigureAwait(false);
                 return 0;
             }
@@ -42,6 +42,17 @@ namespace S3Drive.Tui
                 S3DriveLog.Flush();
                 S3DriveLog.Dispose();
             }
+        }
+
+        private static bool HasFlag(string[] args, string flag)
+        {
+            if (args == null) return false;
+            foreach (string arg in args)
+            {
+                if (string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            return false;
         }
 
         private static void RegisterGlobalHandlers()
