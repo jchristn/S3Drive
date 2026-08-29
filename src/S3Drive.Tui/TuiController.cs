@@ -219,7 +219,9 @@ namespace S3Drive.Tui
 
             string? newest = null;
             DateTime newestTime = DateTime.MinValue;
-            foreach (string file in Directory.GetFiles(directory, "*.log"))
+            // SyslogLogging's FileWithDate mode appends the date after the extension
+            // (for example "s3drive.log.20260829"), so match "*.log*" rather than "*.log".
+            foreach (string file in Directory.GetFiles(directory, "*.log*"))
             {
                 DateTime written = File.GetLastWriteTimeUtc(file);
                 if (written >= newestTime)

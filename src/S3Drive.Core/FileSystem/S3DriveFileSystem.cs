@@ -115,13 +115,14 @@ namespace S3Drive.Core.FileSystem
                 }
                 else if (!context.IsDirectory && context.Dirty && context.StagingPath != null)
                 {
+                    long writtenBytes = File.Exists(context.StagingPath) ? new FileInfo(context.StagingPath).Length : 0;
                     using (_Locks.Acquire(context.Key))
                     {
                         RunPutFromFile(context.Key, context.StagingPath);
                     }
 
                     InvalidateForKey(context.Key, false);
-                    S3DriveLog.Info("write " + KeyMapper.ToPath(context.Key));
+                    S3DriveLog.Info("write " + KeyMapper.ToPath(context.Key) + " (" + writtenBytes + " bytes)");
                 }
             }
             catch (OperationCanceledException)
@@ -287,7 +288,7 @@ namespace S3Drive.Core.FileSystem
                     files.Add(EntryToInformation(entry));
                 }
 
-                S3DriveLog.Info("list " + KeyMapper.ToPath(prefix) + " (" + entries.Count + ")");
+                S3DriveLog.Info("enumerate " + KeyMapper.ToPath(prefix) + " (" + entries.Count + " entries)");
                 return NtStatus.Success;
             }
             catch (OperationCanceledException)
@@ -531,19 +532,26 @@ namespace S3Drive.Core.FileSystem
                 case FileMode.CreateNew:
                     if (fileExists) return NtStatus.ObjectNameCollision;
                     CreateEmptyStaging(context);
+                    S3DriveLog.Info("create " + KeyMapper.ToPath(key));
                     break;
                 case FileMode.Create:
                     CreateEmptyStaging(context);
+                    S3DriveLog.Info((fileExists ? "overwrite " : "create ") + KeyMapper.ToPath(key));
                     break;
                 case FileMode.Open:
                     if (!fileExists) return NtStatus.ObjectNameNotFound;
                     break;
                 case FileMode.OpenOrCreate:
-                    if (!fileExists) CreateEmptyStaging(context);
+                    if (!fileExists)
+                    {
+                        CreateEmptyStaging(context);
+                        S3DriveLog.Info("create " + KeyMapper.ToPath(key));
+                    }
                     break;
                 case FileMode.Truncate:
                     if (!fileExists) return NtStatus.ObjectNameNotFound;
                     CreateEmptyStaging(context);
+                    S3DriveLog.Info("truncate " + KeyMapper.ToPath(key));
                     break;
                 default:
                     if (!fileExists) return NtStatus.ObjectNameNotFound;
@@ -613,7 +621,8 @@ namespace S3Drive.Core.FileSystem
             }
 
             context.StagingPath = path;
-            S3DriveLog.Info("read " + KeyMapper.ToPath(context.Key));
+            long stagedBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+            S3DriveLog.Info("read " + KeyMapper.ToPath(context.Key) + " (" + stagedBytes + " bytes)");
             return path;
         }
 
@@ -653,6 +662,7 @@ namespace S3Drive.Core.FileSystem
             if (_Cache.TryGetHead(key, out S3Entry? cached)) return cached;
             S3Entry? head = _Store.HeadAsync(key, _Token).GetAwaiter().GetResult();
             _Cache.SetHead(key, head);
+            S3DriveLog.Debug("metadata " + KeyMapper.ToPath(key) + (head == null ? " (absent)" : " (" + head.SizeBytes + " bytes)"));
             return head;
         }
 
