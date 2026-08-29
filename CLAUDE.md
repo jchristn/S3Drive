@@ -6,7 +6,7 @@ Guidance for working in this repository.
 
 S3Drive exposes an S3 bucket as a local Windows drive via Dokan.NET, driven by an always-on
 tray agent, and configured/monitored by a TUIKit terminal app. The full design is in
-`S3DRIVE_PLAN.md` — read it before making structural changes.
+`archive/S3DRIVE_PLAN.md` — read it before making structural changes.
 
 ## Fixed product decisions
 

@@ -130,7 +130,7 @@ test/
 
 ## Documentation
 
-- [`S3DRIVE_PLAN.md`](S3DRIVE_PLAN.md) — the full design and implementation plan.
+- [`archive/S3DRIVE_PLAN.md`](archive/S3DRIVE_PLAN.md) — the original design and implementation plan.
 - [`CONCURRENCY_AND_LOCKING.md`](CONCURRENCY_AND_LOCKING.md) — exactly how S3Drive handles
   concurrent access and locking, and the boundaries of its guarantees.
 - [`S3_OPERATIONS.md`](S3_OPERATIONS.md) — how each filesystem operation maps to S3 requests
