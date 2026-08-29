@@ -1,50 +1,42 @@
 #!/usr/bin/env bash
 #
 # Runs the full Test.Automated suite (including the storage integration tests) against an
-# ephemeral S3-compatible endpoint started in Docker.
+# ephemeral Less3 instance started in Docker.
 #
-# By default it spins up MinIO (an S3-compatible endpoint, path-style, no TLS), creates a test
-# bucket, runs the tests, and tears everything down.
+# Less3 is an S3-compatible server. On first start with no config it auto-generates a
+# container configuration and seeds a default tenant, credential (access key "default",
+# secret key "default"), and bucket ("default") — so no provisioning is needed here.
 #
-# To test against a different endpoint instead (real AWS S3, Less3, Ceph, or an already-running
-# MinIO), skip this script and pass the endpoint on the command line:
+# To test against a different endpoint instead (real AWS S3, MinIO, Ceph, or an
+# already-running server), skip this script and pass the endpoint on the command line:
 #
 #   dotnet run --project test/Test.Automated -- \
-#     --endpoint http://127.0.0.1:8000 --access-key KEY --secret-key SECRET \
+#     --endpoint http://127.0.0.1:9000 --access-key KEY --secret-key SECRET \
 #     --bucket my-bucket --provider s3compatible --path-style true --ssl false
 #
 set -euo pipefail
 
-NETWORK="s3drive-itest-net"
-CONTAINER="s3drive-itest-minio"
-BUCKET="s3drive-test"
+CONTAINER="s3drive-itest-less3"
+IMAGE="jchristn77/less3:v4.0.0"
+ENDPOINT="http://127.0.0.1:8000"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  docker network rm "$NETWORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-echo "Starting ephemeral MinIO..."
-docker network create "$NETWORK" >/dev/null 2>&1 || true
+echo "Starting ephemeral Less3 ($IMAGE)..."
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-docker run -d --name "$CONTAINER" --network "$NETWORK" -p 9000:9000 \
-  -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-  minio/minio server /data >/dev/null
+docker run -d --name "$CONTAINER" -p 8000:8000 "$IMAGE" >/dev/null
 
-echo "Waiting for MinIO to become healthy..."
-for _ in $(seq 1 40); do
-  if curl -sf http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then break; fi
+echo "Waiting for Less3 health..."
+for _ in $(seq 1 90); do
+  if curl -sf "$ENDPOINT/healthz" >/dev/null 2>&1; then break; fi
   sleep 1
 done
 
-echo "Creating bucket '$BUCKET'..."
-docker run --rm --network "$NETWORK" \
-  -e MC_HOST_local="http://minioadmin:minioadmin@$CONTAINER:9000" \
-  minio/mc mb --ignore-existing "local/$BUCKET" >/dev/null
-
 echo "Running tests..."
 dotnet run --project "$ROOT/test/Test.Automated/Test.Automated.csproj" -c Debug -- \
-  --endpoint http://127.0.0.1:9000 --access-key minioadmin --secret-key minioadmin \
-  --bucket "$BUCKET" --provider s3compatible --path-style true --ssl false
+  --endpoint "$ENDPOINT" --access-key default --secret-key default \
+  --bucket default --provider s3compatible --path-style true --ssl false

@@ -125,9 +125,30 @@ test/
 
 See [`S3DRIVE_PLAN.md`](S3DRIVE_PLAN.md) for the full design.
 
+## Third-party components
+
+S3Drive depends on the following third-party components. Each is the property of its authors
+and is used under its own license. The **Dokany driver is a separate prerequisite install** —
+it is not bundled with S3Drive and is licensed independently by the Dokan project; obtain it
+from <https://github.com/dokan-dev/dokany>.
+
+| Component | Used for | License |
+|---|---|---|
+| [Dokany](https://github.com/dokan-dev/dokany) (kernel driver, separate install) | User-mode filesystem driver | Dual LGPL-2.1 / MIT (also offered commercially) |
+| [DokanNet](https://github.com/dokan-dev/dokan-dotnet) | Managed Dokan wrapper | MIT |
+| [Blobject](https://github.com/jchristn/blobject) (`Blobject.Core`, `Blobject.AmazonS3`) | S3 / S3-compatible storage | MIT |
+| [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) (`AWSSDK.S3`, via Blobject) | S3 protocol client | Apache-2.0 |
+| [Padlock](https://github.com/jchristn/padlock) | Named locks | MIT |
+| [SyslogLogging](https://github.com/jchristn/loggingmodule) | Logging | MIT |
+| [PrettyId](https://github.com/jchristn/prettyid) | Identifier generation | MIT |
+| [TUIKit](https://www.nuget.org/packages/tuikit) | Terminal user interface | MIT |
+| [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`, `.Desktop`, `.Themes.Fluent`) | Tray icon and About window | MIT |
+| [.NET 8](https://github.com/dotnet/runtime) / `System.Text.Json` | Runtime and serialization | MIT |
+
 ## License
 
-MIT — see [`LICENSE.md`](LICENSE.md).
+S3Drive itself is licensed MIT — see [`LICENSE.md`](LICENSE.md). Third-party components remain
+under their own licenses as listed above.
 
 ## Links
 
