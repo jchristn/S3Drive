@@ -18,7 +18,8 @@ namespace Test.Automated
 
             if (HasFlag(args, "--make-config"))
             {
-                return await AgentControl.WriteConfigAsync(storage, GetArg(args, "--drive-letter"));
+                bool autoMount = !string.Equals(GetArg(args, "--auto-mount"), "false", StringComparison.OrdinalIgnoreCase);
+                return await AgentControl.WriteConfigAsync(storage, GetArg(args, "--drive-letter"), autoMount);
             }
 
             if (HasFlag(args, "--send-command"))
@@ -33,7 +34,6 @@ namespace Test.Automated
             SettingsManagerTests.Register(runner);
             CryptoTests.Register(runner);
             SecurityAndLockTests.Register(runner);
-            SharingTests.Register(runner);
             IpcTests.Register(runner);
             FileSystemTests.Register(runner);
             StorageIntegrationTests.Register(runner, storage);

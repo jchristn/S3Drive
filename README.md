@@ -19,21 +19,21 @@ Your S3 bucket as a local Windows drive.
 ## What it is
 
 S3Drive mounts an S3 bucket as a local Windows drive letter using
-[Dokan](https://github.com/dokan-dev/dokan-dotnet), and can optionally re-expose that drive on
-the network over CIFS/SMB. It works with **Amazon S3** and with **S3-compatible endpoints**
-such as [Less3](https://github.com/jchristn/less3), Ceph, MinIO, and others — including the
-extra settings those endpoints need (custom endpoint URL, SSL on/off, access/secret keys, and
+[Dokan](https://github.com/dokan-dev/dokan-dotnet). Because the result is an ordinary Windows
+volume, you can share it on the network from Windows Explorer just like any other drive. It
+works with **Amazon S3** and with **S3-compatible endpoints** such as
+[Less3](https://github.com/jchristn/less3), Ceph, MinIO, and others — including the extra
+settings those endpoints need (custom endpoint URL, SSL on/off, access/secret keys, and
 virtual-hosted vs path-style addressing).
 
 Two components:
 
-- A **tray agent** that always runs. It owns the actual mounts and network shares and does the
-  work.
+- A **tray agent** that always runs. It owns the actual mounts and does the work.
 - A **terminal UI (TUI)** for configuring connections and monitoring the agent.
 
-The agent is the always-on part. The system keeps running — drives stay mounted and shares
-stay available — **whether or not the TUI is open**. Closing the TUI does not unmount anything;
-only choosing **Exit** from the tray does.
+The agent is the always-on part. The system keeps running — drives stay mounted — **whether or
+not the TUI is open**. Closing the TUI does not unmount anything; only choosing **Exit** from
+the tray does.
 
 ## Features
 
@@ -43,10 +43,12 @@ only choosing **Exit** from the tray does.
   and `/`-delimited prefixes are folders.
 - **Multiple simultaneous mounts.** Each configured connection can mount its bucket to its own
   drive letter at the same time.
-- **Network re-sharing (CIFS/SMB).** Any mounted drive can be re-exported as an SMB share so
-  other machines on the network can connect. Off by default.
+- **Configure and go.** Configuring a drive mounts it automatically, and it re-mounts whenever
+  the agent starts.
+- **Shareable on the network.** A mounted drive is a normal Windows volume, so you share it
+  over the network from Windows Explorer — S3Drive does not manage sharing itself.
 - **Menu-driven TUI** for configuration and live monitoring, plus a **system tray agent** with
-  About, mount/unmount, and share/unshare controls.
+  About and mount/unmount controls.
 
 ## Platform support
 
@@ -63,8 +65,6 @@ version planned** — S3Drive is not intended to be cross-platform.
   prerequisite (dual **LGPL-2.1 / MIT**, also offered commercially) — it is not bundled with
   S3Drive.
 - The **.NET 8 Desktop Runtime** to run, or the **.NET 8 SDK** to build.
-- **Administrator privileges** are required to create or remove SMB shares (network re-sharing
-  only).
 
 ## Getting started
 
@@ -75,8 +75,8 @@ go.bat
 ```
 
 `go.bat` builds the solution and launches the TUI. On startup the TUI checks whether the tray
-agent is running and starts it if it isn't. From the TUI you can add a connection, then mount
-it; from the tray you can mount/unmount, share/unshare, open the TUI, or exit.
+agent is running and starts it if it isn't. Adding a connection in the TUI mounts it
+automatically; from the tray you can mount/unmount, open the TUI, or exit.
 
 ## Configuration
 
@@ -95,19 +95,12 @@ Configuration lives in `%USERPROFILE%\.s3drive\s3drive.json`. A documented examp
 Secret keys are **encrypted at rest** and are never written in plaintext or logged; the TUI
 masks them.
 
-## Network sharing (CIFS/SMB)
+## Sharing on the network
 
-Because a mounted drive is a normal Windows volume, S3Drive can re-share it over SMB. Enable
-sharing per connection, give the share a name, choose read-only or read-write, and list the
-Windows accounts or groups allowed to connect.
-
-A few things to know:
-
-- Creating and removing shares requires **administrator privileges**.
-- Sharing is **off by default**, defaults to **read-only**, and never grants `Everyone`
-  access implicitly.
-- Re-sharing exposes cloud-backed data on your local network. Only enable it for endpoints and
-  buckets you intend to make reachable, and scope the allowed accounts accordingly.
+A mounted S3Drive drive is an ordinary Windows volume, so you share it exactly as you would any
+local drive: in Windows Explorer, right-click the drive, choose **Properties → Sharing**, and
+configure the share name and permissions there. S3Drive itself does not manage network sharing —
+Windows handles it, which keeps share permissions and access control in one familiar place.
 
 ## How files map to objects
 
@@ -126,8 +119,8 @@ Directory.Build.props        shared build settings (net8.0, version 0.1.0, conve
 go.bat                       build the solution and launch the TUI
 assets/                      logo.png, logo.ico
 src/
-  S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, sharing, locks
-  S3Drive.Agent/             Avalonia tray agent (owns mounts and shares)
+  S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, locks
+  S3Drive.Agent/             Avalonia tray agent (owns mounts)
   S3Drive.Tui/               TUIKit configuration and monitoring console
 test/
   Test.Automated/            deterministic Core tests

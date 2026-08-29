@@ -3,7 +3,6 @@ namespace S3Drive.Tui
     using System;
     using System.Collections.Generic;
     using S3Drive.Core.Configuration;
-    using S3Drive.Core.Sharing;
     using TUIKit;
     using TUIKit.Input;
     using TUIKit.Modals;
@@ -29,11 +28,6 @@ namespace S3Drive.Tui
         private readonly Checkbox _UseSsl;
         private readonly Checkbox _UsePathStyle;
         private readonly TextField _DriveLetter = new TextField();
-        private readonly Checkbox _AutoMount;
-        private readonly Checkbox _ShareEnabled;
-        private readonly TextField _ShareName = new TextField();
-        private readonly RadioGroup _ShareAccess = new RadioGroup(new string[] { "ReadOnly", "ReadWrite" });
-        private readonly TextField _AllowedPrincipals = new TextField();
 
         /// <summary>
         /// Initializes the form, optionally prefilled from an existing profile.
@@ -45,8 +39,6 @@ namespace S3Drive.Tui
 
             _UseSsl = new Checkbox("Use SSL", existing?.UseSsl ?? true);
             _UsePathStyle = new Checkbox("Path-style addressing", existing?.UsePathStyle ?? false);
-            _AutoMount = new Checkbox("Auto-mount", existing?.AutoMount ?? false);
-            _ShareEnabled = new Checkbox("Enable network share", existing?.Share.Enabled ?? false);
 
             if (existing != null)
             {
@@ -56,8 +48,6 @@ namespace S3Drive.Tui
                 _Bucket.Value = existing.Bucket;
                 _AccessKey.Value = existing.AccessKey;
                 _DriveLetter.Value = existing.DriveLetter;
-                _ShareName.Value = existing.Share.ShareName ?? string.Empty;
-                _AllowedPrincipals.Value = string.Join(", ", existing.Share.AllowedPrincipals);
             }
 
             _Form.Add("Name", _Name, () => _Name.Value.Trim().Length == 0 ? "Name is required." : null);
@@ -70,11 +60,6 @@ namespace S3Drive.Tui
             _Form.Add("Use SSL", _UseSsl);
             _Form.Add("Path-style addressing", _UsePathStyle);
             _Form.Add("Drive letter (e.g. S:)", _DriveLetter, () => _DriveLetter.Value.Trim().Length == 0 ? "Drive letter is required." : null);
-            _Form.Add("Auto-mount", _AutoMount);
-            _Form.Add("Enable network share", _ShareEnabled);
-            _Form.Add("Share name", _ShareName);
-            _Form.Add("Share access", _ShareAccess);
-            _Form.Add("Allowed principals (comma-separated)", _AllowedPrincipals);
 
             // Maps each form-field index to its text field (null for non-text fields), so a
             // paste can be inserted into the focused field. Order must match the Add calls above.
@@ -89,12 +74,7 @@ namespace S3Drive.Tui
                 _Secret,        // 6
                 null,           // 7  Use SSL (checkbox)
                 null,           // 8  Path-style (checkbox)
-                _DriveLetter,   // 9
-                null,           // 10 Auto-mount (checkbox)
-                null,           // 11 Enable share (checkbox)
-                _ShareName,     // 12
-                null,           // 13 Share access (radio)
-                _AllowedPrincipals // 14
+                _DriveLetter    // 9
             };
         }
 
@@ -209,12 +189,7 @@ namespace S3Drive.Tui
                 SecretPlain = _Secret.Value,
                 UseSsl = _UseSsl.Checked,
                 UsePathStyle = _UsePathStyle.Checked,
-                DriveLetter = _DriveLetter.Value.Trim(),
-                AutoMount = _AutoMount.Checked,
-                ShareEnabled = _ShareEnabled.Checked,
-                ShareName = NullIfEmpty(_ShareName.Value),
-                ShareAccess = _ShareAccess.SelectedIndex == 1 ? ShareAccessEnum.ReadWrite : ShareAccessEnum.ReadOnly,
-                AllowedPrincipals = Split(_AllowedPrincipals.Value)
+                DriveLetter = _DriveLetter.Value.Trim()
             };
 
             Close(result);
@@ -224,18 +199,6 @@ namespace S3Drive.Tui
         {
             string trimmed = value.Trim();
             return trimmed.Length == 0 ? null : trimmed;
-        }
-
-        private static List<string> Split(string value)
-        {
-            List<string> list = new List<string>();
-            foreach (string part in value.Split(','))
-            {
-                string trimmed = part.Trim();
-                if (trimmed.Length > 0) list.Add(trimmed);
-            }
-
-            return list;
         }
     }
 }

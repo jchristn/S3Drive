@@ -12,13 +12,12 @@ namespace S3Drive.Core.Mounting
     using S3Drive.Core.FileSystem;
     using S3Drive.Core.Ipc;
     using S3Drive.Core.Security;
-    using S3Drive.Core.Sharing;
     using S3Drive.Core.Storage;
 
     /// <summary>
-    /// Owns the set of active mounts. Each mount exposes one bucket as one drive letter and,
-    /// optionally, re-shares it over SMB. Mount and share lifecycles are kept in step: the share
-    /// is created only after a successful mount and removed before the mount is torn down.
+    /// Owns the set of active mounts. Each mount exposes one bucket as one drive letter; multiple
+    /// drives can be mounted at once. S3Drive does not manage network sharing — a mounted drive can
+    /// be shared from Windows Explorer like any other volume.
     /// </summary>
     public sealed class MountManager : IAsyncDisposable
     {
@@ -26,7 +25,6 @@ namespace S3Drive.Core.Mounting
         private readonly Dictionary<string, MountEntry> _Mounts = new Dictionary<string, MountEntry>(StringComparer.Ordinal);
         private readonly S3DrivePaths _Paths;
         private readonly CredentialProtector _Protector;
-        private readonly ISmbShareManager _ShareManager;
         private int _MetadataCacheSeconds = 5;
 
         /// <summary>
@@ -34,13 +32,11 @@ namespace S3Drive.Core.Mounting
         /// </summary>
         /// <param name="paths">The path resolver. Cannot be null.</param>
         /// <param name="protector">The credential protector used to decrypt secret keys. Cannot be null.</param>
-        /// <param name="shareManager">The SMB share manager. Cannot be null.</param>
         /// <exception cref="ArgumentNullException">Thrown when any argument is null.</exception>
-        public MountManager(S3DrivePaths paths, CredentialProtector protector, ISmbShareManager shareManager)
+        public MountManager(S3DrivePaths paths, CredentialProtector protector)
         {
             _Paths = paths ?? throw new ArgumentNullException(nameof(paths));
             _Protector = protector ?? throw new ArgumentNullException(nameof(protector));
-            _ShareManager = shareManager ?? throw new ArgumentNullException(nameof(shareManager));
         }
 
         /// <summary>
@@ -71,8 +67,7 @@ namespace S3Drive.Core.Mounting
         }
 
         /// <summary>
-        /// Mounts a drive for the given profile, creating its SMB share when enabled. If the drive
-        /// is already mounted, this is a no-op.
+        /// Mounts a drive for the given profile. If the drive is already mounted, this is a no-op.
         /// </summary>
         /// <param name="profile">The drive profile. Cannot be null.</param>
         /// <param name="token">A cancellation token.</param>
@@ -138,31 +133,24 @@ namespace S3Drive.Core.Mounting
             }
 
             RaiseStatus();
-
-            if (profile.Share.Enabled && _ShareManager.IsSupported)
-            {
-                await CreateShareAsync(entry, token).ConfigureAwait(false);
-            }
         }
 
         /// <summary>
-        /// Unmounts a drive, removing its SMB share first. Unmounting an unknown drive is a no-op.
+        /// Unmounts a drive. Unmounting an unknown drive is a no-op.
         /// </summary>
         /// <param name="driveId">The drive identifier. Cannot be null or empty.</param>
         /// <param name="token">A cancellation token.</param>
         /// <exception cref="ArgumentException">Thrown when <paramref name="driveId"/> is null or empty.</exception>
-        public async Task UnmountAsync(string driveId, CancellationToken token)
+        public Task UnmountAsync(string driveId, CancellationToken token)
         {
             if (string.IsNullOrEmpty(driveId)) throw new ArgumentException("Drive id must be provided.", nameof(driveId));
 
             MountEntry? entry;
             lock (_Sync)
             {
-                if (!_Mounts.TryGetValue(driveId, out entry)) return;
+                if (!_Mounts.TryGetValue(driveId, out entry)) return Task.CompletedTask;
                 _Mounts.Remove(driveId);
             }
-
-            await RemoveShareIfPresentAsync(entry, token).ConfigureAwait(false);
 
             entry.Status.MountState = DriveMountStateEnum.Unmounting;
             RaiseStatus();
@@ -187,47 +175,7 @@ namespace S3Drive.Core.Mounting
             }
 
             RaiseStatus();
-        }
-
-        /// <summary>
-        /// Creates the SMB share for a mounted drive.
-        /// </summary>
-        /// <param name="driveId">The drive identifier. Cannot be null or empty.</param>
-        /// <param name="token">A cancellation token.</param>
-        /// <exception cref="ArgumentException">Thrown when <paramref name="driveId"/> is null or empty.</exception>
-        public async Task ShareAsync(string driveId, CancellationToken token)
-        {
-            if (string.IsNullOrEmpty(driveId)) throw new ArgumentException("Drive id must be provided.", nameof(driveId));
-
-            MountEntry? entry;
-            lock (_Sync)
-            {
-                _Mounts.TryGetValue(driveId, out entry);
-            }
-
-            if (entry == null) return;
-            await CreateShareAsync(entry, token).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// Removes the SMB share for a mounted drive without unmounting it.
-        /// </summary>
-        /// <param name="driveId">The drive identifier. Cannot be null or empty.</param>
-        /// <param name="token">A cancellation token.</param>
-        /// <exception cref="ArgumentException">Thrown when <paramref name="driveId"/> is null or empty.</exception>
-        public async Task UnshareAsync(string driveId, CancellationToken token)
-        {
-            if (string.IsNullOrEmpty(driveId)) throw new ArgumentException("Drive id must be provided.", nameof(driveId));
-
-            MountEntry? entry;
-            lock (_Sync)
-            {
-                _Mounts.TryGetValue(driveId, out entry);
-            }
-
-            if (entry == null) return;
-            await RemoveShareIfPresentAsync(entry, token).ConfigureAwait(false);
-            RaiseStatus();
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -275,45 +223,6 @@ namespace S3Drive.Core.Mounting
             await UnmountAllAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
-        private async Task CreateShareAsync(MountEntry entry, CancellationToken token)
-        {
-            try
-            {
-                string mountPoint = ToMountPoint(entry.Profile.DriveLetter);
-                await _ShareManager.CreateShareAsync(entry.Profile, mountPoint, token).ConfigureAwait(false);
-                entry.Status.Shared = true;
-                entry.Status.ShareName = entry.Profile.Share.ShareName;
-                entry.Status.LastError = null;
-            }
-            catch (Exception ex)
-            {
-                entry.Status.Shared = false;
-                entry.Status.LastError = ex.Message;
-            }
-
-            RaiseStatus();
-        }
-
-        private async Task RemoveShareIfPresentAsync(MountEntry entry, CancellationToken token)
-        {
-            if (!entry.Status.Shared && !entry.Profile.Share.Enabled) return;
-
-            string? shareName = entry.Status.ShareName ?? entry.Profile.Share.ShareName;
-            if (string.IsNullOrEmpty(shareName)) return;
-
-            try
-            {
-                await _ShareManager.RemoveShareAsync(shareName, token).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                entry.Status.LastError = ex.Message;
-            }
-
-            entry.Status.Shared = false;
-            entry.Status.ShareName = null;
-        }
-
         private void RaiseStatus()
         {
             Action<AgentStatus>? handler = StatusChanged;
@@ -336,8 +245,6 @@ namespace S3Drive.Core.Mounting
                 Name = source.Name,
                 MountState = source.MountState,
                 DriveLetter = source.DriveLetter,
-                Shared = source.Shared,
-                ShareName = source.ShareName,
                 LastError = source.LastError
             };
         }

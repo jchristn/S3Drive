@@ -4,7 +4,6 @@ namespace Test.Automated.Tests
     using System.Text.Json;
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Serialization;
-    using S3Drive.Core.Sharing;
     using Test.Automated.Harness;
 
     /// <summary>
@@ -50,16 +49,6 @@ namespace Test.Automated.Tests
                 Assert.Equal(string.Empty, profile.Id);
                 profile.Bucket = null!;
                 Assert.Equal(string.Empty, profile.Bucket);
-                profile.Share = null!;
-                Assert.NotNull(profile.Share);
-            });
-
-            runner.Add("SmbShareSettings coalesces principals", () =>
-            {
-                SmbShareSettings share = new SmbShareSettings();
-                share.AllowedPrincipals = null!;
-                Assert.NotNull(share.AllowedPrincipals);
-                Assert.Equal(0, share.AllowedPrincipals.Count);
             });
 
             runner.Add("Json serializes enums as strings and round-trips", () =>
@@ -71,18 +60,15 @@ namespace Test.Automated.Tests
                     Provider = S3ProviderEnum.S3Compatible,
                     Bucket = "b"
                 };
-                profile.Share.Access = ShareAccessEnum.ReadWrite;
                 settings.Drives.Add(profile);
 
                 string json = JsonSerializer.Serialize(settings, S3DriveJson.Options);
                 Assert.Contains(json, "S3Compatible");
-                Assert.Contains(json, "ReadWrite");
 
                 S3DriveSettings? back = JsonSerializer.Deserialize<S3DriveSettings>(json, S3DriveJson.Options);
                 Assert.NotNull(back);
                 Assert.Equal(1, back!.Drives.Count);
                 Assert.Equal(S3ProviderEnum.S3Compatible, back.Drives[0].Provider);
-                Assert.Equal(ShareAccessEnum.ReadWrite, back.Drives[0].Share.Access);
             });
 
             runner.Add("Paths derive from explicit root", () =>

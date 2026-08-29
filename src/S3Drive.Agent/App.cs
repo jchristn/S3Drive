@@ -89,9 +89,7 @@ namespace S3Drive.Agent
 
         private NativeMenuItem BuildDriveItem(DriveStatus drive)
         {
-            string suffix = drive.MountState.ToString();
-            if (drive.Shared) suffix += ", shared";
-            NativeMenuItem item = new NativeMenuItem(drive.Name + "  [" + suffix + "]");
+            NativeMenuItem item = new NativeMenuItem(drive.Name + "  [" + drive.MountState + "]");
 
             NativeMenu sub = new NativeMenu();
             string id = drive.DriveId;
@@ -104,18 +102,6 @@ namespace S3Drive.Agent
                 else _ = _Host!.MountAsync(id);
             };
             sub.Items.Add(mount);
-
-            if (mounted)
-            {
-                bool shared = drive.Shared;
-                NativeMenuItem share = new NativeMenuItem(shared ? "Unshare" : "Share");
-                share.Click += (sender, args) =>
-                {
-                    if (shared) _ = _Host!.UnshareAsync(id);
-                    else _ = _Host!.ShareAsync(id);
-                };
-                sub.Items.Add(share);
-            }
 
             item.Menu = sub;
             return item;

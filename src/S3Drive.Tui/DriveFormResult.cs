@@ -1,8 +1,6 @@
 namespace S3Drive.Tui
 {
-    using System.Collections.Generic;
     using S3Drive.Core.Configuration;
-    using S3Drive.Core.Sharing;
 
     /// <summary>
     /// The raw values captured by the drive form, before encryption and validation.
@@ -38,20 +36,5 @@ namespace S3Drive.Tui
 
         /// <summary>The drive letter.</summary>
         public string DriveLetter { get; set; } = string.Empty;
-
-        /// <summary>Whether the drive auto-mounts.</summary>
-        public bool AutoMount { get; set; }
-
-        /// <summary>Whether the drive is shared over SMB.</summary>
-        public bool ShareEnabled { get; set; }
-
-        /// <summary>The share name.</summary>
-        public string? ShareName { get; set; }
-
-        /// <summary>The share access level.</summary>
-        public ShareAccessEnum ShareAccess { get; set; }
-
-        /// <summary>The allowed share principals.</summary>
-        public List<string> AllowedPrincipals { get; set; } = new List<string>();
     }
 }

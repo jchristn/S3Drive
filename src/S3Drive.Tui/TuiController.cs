@@ -41,6 +41,7 @@ namespace S3Drive.Tui
         private TuiApplication? _App;
         private S3DriveSettings _Settings = new S3DriveSettings();
         private AgentStatus? _Status;
+        private List<string> _LastContentLines = new List<string>();
 
         /// <summary>
         /// Initializes a new controller.
@@ -102,11 +103,30 @@ namespace S3Drive.Tui
             app.Bind("d", () => Launch(DeleteDriveAsync));
             app.Bind("m", () => Launch(MountDriveAsync));
             app.Bind("u", () => Launch(UnmountDriveAsync));
-            app.Bind("s", () => Launch(ShareDriveAsync));
-            app.Bind("x", () => Launch(UnshareDriveAsync));
             app.Bind("f1", () => Launch(HelpAsync));
 
             Launch(RefreshAsync);
+            StartStatusPolling(app);
+        }
+
+        private void StartStatusPolling(TuiApplication app)
+        {
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        _Status = await StatusStore.ReadAsync(_Paths, CancellationToken.None).ConfigureAwait(false);
+                        app.Post(RenderContent);
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    await Task.Delay(1000).ConfigureAwait(false);
+                }
+            });
         }
 
         private void RenderHeader()
@@ -119,7 +139,7 @@ namespace S3Drive.Tui
         private void RenderHints()
         {
             _Hints.Clear();
-            _Hints.WriteLine("[c]add [e]edit [d]delete  [m]mount [u]unmount  [s]share [x]unshare  [r]refresh  [F1]help  [Ctrl+Q]quit");
+            _Hints.WriteLine("[c]add  [e]edit  [d]delete  [m]mount  [u]unmount  [r]refresh  [F1]help  [Ctrl+Q]quit");
         }
 
         private void OnLogMessage(string severity, string message)
@@ -138,31 +158,46 @@ namespace S3Drive.Tui
 
         private void RenderContent()
         {
-            _Content.Clear();
+            List<string> lines = BuildContentLines();
+            if (SameLines(lines, _LastContentLines)) return;
+            _LastContentLines = lines;
 
+            _Content.Clear();
+            foreach (string line in lines)
+            {
+                _Content.WriteLine(line);
+            }
+        }
+
+        private List<string> BuildContentLines()
+        {
+            List<string> lines = new List<string>();
             if (_Settings.Drives.Count == 0)
             {
-                _Content.WriteLine("No drives configured. Press 'c' to add one.");
-                return;
+                lines.Add("No drives configured. Press 'c' to add one.");
+                return lines;
             }
 
-            _Content.WriteLine(Row("Name", "Provider", "Bucket", "Letter", "Mount", "Share"));
+            lines.Add(Row("Name", "Provider", "Bucket", "Letter", "Mount"));
             foreach (DriveProfile profile in _Settings.Drives)
             {
                 DriveStatus? status = FindStatus(profile.Id);
                 string mount = status?.MountState.ToString() ?? "Unmounted";
-                string share;
-                if (status != null && status.Shared)
-                {
-                    share = "shared:" + (status.ShareName ?? profile.Share.ShareName ?? string.Empty);
-                }
-                else
-                {
-                    share = profile.Share.Enabled ? "configured" : "-";
-                }
-
-                _Content.WriteLine(Row(profile.Name, profile.Provider.ToString(), profile.Bucket, profile.DriveLetter, mount, share));
+                lines.Add(Row(profile.Name, profile.Provider.ToString(), profile.Bucket, profile.DriveLetter, mount));
             }
+
+            return lines;
+        }
+
+        private static bool SameLines(List<string> a, List<string> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
+            }
+
+            return true;
         }
 
         private async Task AddDriveAsync()
@@ -219,27 +254,17 @@ namespace S3Drive.Tui
             await CommandOnSelectedAsync("Unmount which drive?", AgentCommandTypeEnum.Unmount).ConfigureAwait(false);
         }
 
-        private async Task ShareDriveAsync()
-        {
-            await CommandOnSelectedAsync("Share which drive?", AgentCommandTypeEnum.Share).ConfigureAwait(false);
-        }
-
-        private async Task UnshareDriveAsync()
-        {
-            await CommandOnSelectedAsync("Unshare which drive?", AgentCommandTypeEnum.Unshare).ConfigureAwait(false);
-        }
-
         private async Task HelpAsync()
         {
             TuiApplication app = RequireApp();
             string help = "S3Drive TUI\n\n"
-                + "The tray agent owns all mounts and shares and keeps running when this window is closed.\n\n"
+                + "The tray agent owns all mounts and keeps running when this window is closed.\n\n"
                 + "c  add a drive        e  edit        d  delete\n"
                 + "m  mount              u  unmount\n"
-                + "s  share (SMB)        x  unshare\n"
                 + "r  refresh            F1 help        Ctrl+Q quit\n\n"
                 + "One drive maps to one bucket. Works with AWS S3 and S3-compatible endpoints\n"
-                + "(Less3, Ceph, MinIO, and others). Network sharing requires administrator rights.";
+                + "(Less3, Ceph, MinIO, and others). To share a mounted drive on the network,\n"
+                + "use Windows Explorer (right-click the drive, Properties, Sharing).";
             await app.ShowAsync(new MessageModal("Help", help, new List<string> { "OK" })).ConfigureAwait(false);
         }
 
@@ -280,11 +305,7 @@ namespace S3Drive.Tui
             profile.UseSsl = result.UseSsl;
             profile.UsePathStyle = result.UsePathStyle;
             profile.DriveLetter = result.DriveLetter;
-            profile.AutoMount = result.AutoMount;
-            profile.Share.Enabled = result.ShareEnabled;
-            profile.Share.ShareName = result.ShareName;
-            profile.Share.Access = result.ShareAccess;
-            profile.Share.AllowedPrincipals = result.AllowedPrincipals;
+            profile.AutoMount = true;
 
             if (result.SecretPlain.Length > 0)
             {
@@ -340,16 +361,15 @@ namespace S3Drive.Tui
             return _App;
         }
 
-        private static string Row(string name, string provider, string bucket, string letter, string mount, string share)
+        private static string Row(string name, string provider, string bucket, string letter, string mount)
         {
             return string.Format(
-                "{0,-18} {1,-13} {2,-18} {3,-7} {4,-11} {5}",
-                Trim(name, 18),
-                Trim(provider, 13),
-                Trim(bucket, 18),
-                Trim(letter, 7),
-                Trim(mount, 11),
-                share);
+                "{0,-20} {1,-14} {2,-22} {3,-8} {4}",
+                Trim(name, 20),
+                Trim(provider, 14),
+                Trim(bucket, 22),
+                Trim(letter, 8),
+                mount);
         }
 
         private static string Trim(string value, int max)

@@ -82,8 +82,7 @@ namespace Test.Automated.Tests
                         DriveId = "drv_1",
                         Name = "Prod",
                         MountState = DriveMountStateEnum.Mounted,
-                        Shared = true,
-                        ShareName = "S3Drive-Prod"
+                        DriveLetter = "S:\\"
                     });
                     await StatusStore.WriteAsync(paths, status, CancellationToken.None);
 
@@ -92,8 +91,7 @@ namespace Test.Automated.Tests
                     Assert.Equal(123, back!.ProcessId);
                     Assert.Equal(1, back.Drives.Count);
                     Assert.Equal(DriveMountStateEnum.Mounted, back.Drives[0].MountState);
-                    Assert.True(back.Drives[0].Shared);
-                    Assert.Equal("S3Drive-Prod", back.Drives[0].ShareName);
+                    Assert.Equal("S:\\", back.Drives[0].DriveLetter);
                 }
                 finally
                 {

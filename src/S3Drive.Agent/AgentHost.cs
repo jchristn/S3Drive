@@ -10,7 +10,6 @@ namespace S3Drive.Agent
     using S3Drive.Core.Ipc;
     using S3Drive.Core.Mounting;
     using S3Drive.Core.Security;
-    using S3Drive.Core.Sharing;
 
     /// <summary>
     /// The background host that owns the mount manager, processes commands from the TUI, and
@@ -38,10 +37,7 @@ namespace S3Drive.Agent
             _Paths = paths;
             _SettingsManager = new SettingsManager(paths);
             CredentialProtector protector = new CredentialProtector(paths.MachineKeyFile);
-            ISmbShareManager share = OperatingSystem.IsWindows()
-                ? new WindowsSmbShareManager()
-                : new NullSmbShareManager();
-            _Mounts = new MountManager(paths, protector, share);
+            _Mounts = new MountManager(paths, protector);
             _Mounts.StatusChanged += _ => PublishStatusFireAndForget();
         }
 
@@ -119,35 +115,12 @@ namespace S3Drive.Agent
             await PublishStatusAsync(Token()).ConfigureAwait(false);
         }
 
-        /// <summary>
-        /// Creates the SMB share for a mounted drive (invoked from the tray).
-        /// </summary>
-        /// <param name="driveId">The drive id.</param>
-        /// <returns>A task.</returns>
-        public async Task ShareAsync(string driveId)
-        {
-            await _Mounts.ShareAsync(driveId, Token()).ConfigureAwait(false);
-            await PublishStatusAsync(Token()).ConfigureAwait(false);
-        }
-
-        /// <summary>
-        /// Removes the SMB share for a mounted drive (invoked from the tray).
-        /// </summary>
-        /// <param name="driveId">The drive id.</param>
-        /// <returns>A task.</returns>
-        public async Task UnshareAsync(string driveId)
-        {
-            await _Mounts.UnshareAsync(driveId, Token()).ConfigureAwait(false);
-            await PublishStatusAsync(Token()).ConfigureAwait(false);
-        }
-
         private async Task RunAsync(CancellationToken token)
         {
             try
             {
                 _Settings = await _SettingsManager.LoadAsync(token).ConfigureAwait(false);
                 _Mounts.MetadataCacheSeconds = _Settings.MetadataCacheSeconds;
-                await ReconcileSharesAsync(token).ConfigureAwait(false);
                 await AutoMountAsync(token).ConfigureAwait(false);
                 await PublishStatusAsync(token).ConfigureAwait(false);
 
@@ -171,12 +144,6 @@ namespace S3Drive.Agent
             {
                 S3DriveLog.WriteCrash(ex, "agent host loop");
             }
-        }
-
-        private async Task ReconcileSharesAsync(CancellationToken token)
-        {
-            // Best-effort: nothing persisted to reconcile at startup beyond what the OS holds.
-            await Task.CompletedTask.ConfigureAwait(false);
         }
 
         private async Task AutoMountAsync(CancellationToken token)
@@ -227,6 +194,7 @@ namespace S3Drive.Agent
                 case AgentCommandTypeEnum.Reload:
                     _Settings = await _SettingsManager.LoadAsync(token).ConfigureAwait(false);
                     _Mounts.MetadataCacheSeconds = _Settings.MetadataCacheSeconds;
+                    await AutoMountAsync(token).ConfigureAwait(false);
                     break;
                 case AgentCommandTypeEnum.Mount:
                     DriveProfile? mountProfile = Find(command.DriveId);
@@ -244,12 +212,6 @@ namespace S3Drive.Agent
                     break;
                 case AgentCommandTypeEnum.UnmountAll:
                     await _Mounts.UnmountAllAsync(token).ConfigureAwait(false);
-                    break;
-                case AgentCommandTypeEnum.Share:
-                    if (!string.IsNullOrEmpty(command.DriveId)) await _Mounts.ShareAsync(command.DriveId, token).ConfigureAwait(false);
-                    break;
-                case AgentCommandTypeEnum.Unshare:
-                    if (!string.IsNullOrEmpty(command.DriveId)) await _Mounts.UnshareAsync(command.DriveId, token).ConfigureAwait(false);
                     break;
                 default:
                     break;
@@ -285,8 +247,7 @@ namespace S3Drive.Agent
                     {
                         DriveId = profile.Id,
                         Name = profile.Name,
-                        MountState = DriveMountStateEnum.Unmounted,
-                        ShareName = profile.Share.ShareName
+                        MountState = DriveMountStateEnum.Unmounted
                     });
                 }
             }

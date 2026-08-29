@@ -1,10 +1,9 @@
 namespace S3Drive.Core.Configuration
 {
-    using S3Drive.Core.Sharing;
-
     /// <summary>
-    /// A single S3 connection profile: the endpoint, credentials, the bucket it exposes, the
-    /// drive letter it mounts to, and its optional network share.
+    /// A single S3 connection profile: the endpoint, credentials, the bucket it exposes, and the
+    /// drive letter it mounts to. Network sharing is not managed by S3Drive — once mounted, the
+    /// drive can be shared from Windows Explorer like any other volume.
     /// </summary>
     public class DriveProfile
     {
@@ -14,7 +13,6 @@ namespace S3Drive.Core.Configuration
         private string _AccessKey = string.Empty;
         private string _SecretKeyEncrypted = string.Empty;
         private string _DriveLetter = string.Empty;
-        private SmbShareSettings _Share = new SmbShareSettings();
 
         /// <summary>
         /// Stable identifier for this profile (a PrettyId with the "drv_" prefix). Never null.
@@ -98,17 +96,9 @@ namespace S3Drive.Core.Configuration
         }
 
         /// <summary>
-        /// Whether this profile is mounted automatically when the agent starts. Defaults to false.
+        /// Whether this profile is mounted automatically when the agent starts or reloads its
+        /// configuration. Defaults to true — configuring a drive mounts it.
         /// </summary>
-        public bool AutoMount { get; set; } = false;
-
-        /// <summary>
-        /// Network-sharing settings for this drive. Never null.
-        /// </summary>
-        public SmbShareSettings Share
-        {
-            get { return _Share; }
-            set { _Share = value ?? new SmbShareSettings(); }
-        }
+        public bool AutoMount { get; set; } = true;
     }
 }

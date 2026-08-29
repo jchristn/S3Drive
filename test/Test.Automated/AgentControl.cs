@@ -21,7 +21,7 @@ namespace Test.Automated
         /// <param name="config">The storage configuration.</param>
         /// <param name="driveLetter">The drive letter to mount.</param>
         /// <returns>Zero on success; one on failure.</returns>
-        public static async Task<int> WriteConfigAsync(StorageTestConfig config, string? driveLetter)
+        public static async Task<int> WriteConfigAsync(StorageTestConfig config, string? driveLetter, bool autoMount)
         {
             if (!config.Enabled)
             {
@@ -39,7 +39,7 @@ namespace Test.Automated
             profile.Id = "drv_test";
             profile.Name = "Less3 test";
             profile.SecretKeyEncrypted = encrypted;
-            profile.AutoMount = true;
+            profile.AutoMount = autoMount;
             if (!string.IsNullOrEmpty(driveLetter))
             {
                 string cleaned = driveLetter.TrimEnd(':', '\\', ' ');
@@ -78,8 +78,6 @@ namespace Test.Automated
                 case "unmount": return AgentCommandTypeEnum.Unmount;
                 case "mount-all": return AgentCommandTypeEnum.MountAll;
                 case "unmount-all": return AgentCommandTypeEnum.UnmountAll;
-                case "share": return AgentCommandTypeEnum.Share;
-                case "unshare": return AgentCommandTypeEnum.Unshare;
                 default: return AgentCommandTypeEnum.Reload;
             }
         }

@@ -37,16 +37,6 @@ namespace S3Drive.Core.Ipc
         public string? DriveLetter { get; set; }
 
         /// <summary>
-        /// Whether the drive is currently shared over SMB.
-        /// </summary>
-        public bool Shared { get; set; }
-
-        /// <summary>
-        /// The SMB share name, when shared. May be null.
-        /// </summary>
-        public string? ShareName { get; set; }
-
-        /// <summary>
         /// The most recent error message for this drive when the last operation failed. May be null.
         /// </summary>
         public string? LastError { get; set; }

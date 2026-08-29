@@ -18,14 +18,7 @@
       "UsePathStyle": false,
       "UseSsl": true,
       "DriveLetter": "S:",
-      "AutoMount": true,
-      "Share": {
-        "Enabled": false,
-        "ShareName": "S3Drive-AWS",
-        "Access": "ReadOnly",
-        "AllowedPrincipals": [],
-        "Description": "Amazon S3 example over SMB"
-      }
+      "AutoMount": true
     },
     {
       "Id": "drv_example_minio",
@@ -39,14 +32,7 @@
       "SecretKeyEncrypted": "set-via-the-TUI-do-not-store-plaintext-here",
       "UsePathStyle": true,
       "DriveLetter": "T:",
-      "AutoMount": false,
-      "Share": {
-        "Enabled": false,
-        "ShareName": "S3Drive-Lab",
-        "Access": "ReadOnly",
-        "AllowedPrincipals": [],
-        "Description": "S3-compatible lab bucket over SMB"
-      }
+      "AutoMount": true
     }
   ]
 }

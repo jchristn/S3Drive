@@ -26,16 +26,6 @@ namespace S3Drive.Core.Ipc
         UnmountAll,
 
         /// <summary>
-        /// Create the network share for a specific drive.
-        /// </summary>
-        Share,
-
-        /// <summary>
-        /// Remove the network share for a specific drive.
-        /// </summary>
-        Unshare,
-
-        /// <summary>
         /// Reload configuration from disk.
         /// </summary>
         Reload
