@@ -125,8 +125,9 @@ Two more components are internally thread-safe because they are touched from mul
 
 - **`MetadataCache`** (`src/S3Drive.Core/Storage/MetadataCache.cs`) guards its listing and
   attribute dictionaries with a single lock. It caches directory listings and object HEADs for a
-  configurable time-to-live and invalidates the affected entries immediately on any local mutation,
-  so the drive always reflects its own writes without waiting for the TTL.
+  configurable time-to-live (and seeds a listed file's HEAD entry from the listing itself), and
+  invalidates the affected entries immediately on any local mutation, so the drive always reflects
+  its own writes without waiting for the TTL.
 - **`MountManager`** (`src/S3Drive.Core/Mounting/MountManager.cs`) guards its set of active mounts
   with a lock, so mount, unmount, and status snapshots are consistent even when the tray and the
   command loop act at the same time.

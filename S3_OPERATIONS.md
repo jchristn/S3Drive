@@ -13,14 +13,16 @@ which wraps the AWS SDK. The relevant code is `S3Drive.Core.Storage.BlobS3Store`
 `S3Drive.Core.FileSystem.S3DriveFileSystem` (`src/S3Drive.Core/FileSystem/S3DriveFileSystem.cs`),
 which implements Dokan's `IDokanOperations`.
 
-Blobject exposes only single-object operations, so for the one case where S3Drive deletes many
-objects at once — cleaning up after a directory rename — `BlobS3Store` also holds a direct
-`Amazon.S3.IAmazonS3` client (configured from the same profile) and uses the S3 multi-object delete
-(`DeleteObjects`) API. See [Bulk delete](#bulk-delete-multi-object-delete) below.
+`BlobS3Store` uses Blobject for reads, writes, listings, and metadata, but talks to the **AWS SDK
+directly** for deletes. It holds an `Amazon.S3.IAmazonS3` client (built from the same drive profile
+as the Blobject client) and uses it for two things Blobject cannot express well: a single
+`DeleteObject` with no preceding existence check (Blobject's delete is not exposed idempotently),
+and the S3 multi-object delete (`DeleteObjects`) used when cleaning up after a directory rename. See
+[Delete](#create-and-delete) and [Bulk delete](#bulk-delete-multi-object-delete) below.
 
 ## The core mapping
 
-| Filesystem operation (Dokan) | S3Drive method | Blobject call | Underlying S3 request |
+| Filesystem operation (Dokan) | S3Drive method | Storage-client call | Underlying S3 request |
 |---|---|---|---|
 | Enumerate a directory (`FindFiles`) | `IS3Store.ListAsync(prefix)` | `EnumerateAsync(EnumerationFilter{Prefix})` | `ListObjectsV2` (by prefix) |
 | Recursive enumerate (rename/delete) | `IS3Store.ListAllKeysAsync(prefix)` | `EnumerateAsync(EnumerationFilter{Prefix})` | `ListObjectsV2` (by prefix) |
@@ -52,6 +54,11 @@ The scheme follows the profile's SSL toggle, and the region defaults to `us-east
 is why the profile carries `ServiceUrl`, `UseSsl`, and `UsePathStyle` — S3-compatible servers vary in
 which addressing they accept, and Blobject has no boolean for it, so the choice is expressed through
 the URL template.
+
+The direct `IAmazonS3` client used for deletes is configured from the **same** profile so it reaches
+the same endpoint: for AWS it takes the `RegionEndpoint`; for an S3-compatible endpoint it sets
+`AmazonS3Config.ServiceURL` (scheme from `UseSsl`), `ForcePathStyle` from `UsePathStyle`, and
+`UseHttp` from `UseSsl`. Both clients therefore address objects identically.
 
 ## Enumeration and directory traversal
 
