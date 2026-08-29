@@ -17,6 +17,7 @@ namespace S3Drive.Tui
         private readonly string _Title;
         private readonly Form _Form = new Form();
         private readonly List<TextField?> _TextByIndex;
+        private string? _Error;
 
         private readonly TextField _Name = new TextField();
         private readonly RadioGroup _Provider = new RadioGroup(new string[] { "AwsS3", "S3Compatible" });
@@ -106,7 +107,7 @@ namespace S3Drive.Tui
                 return true;
             }
 
-            if (key.Code == KeyCode.Enter && key.Modifiers == KeyModifiers.None)
+            if (key.Code == KeyCode.Enter)
             {
                 Submit();
                 return true;
@@ -146,7 +147,7 @@ namespace S3Drive.Tui
             surface.DrawBox(new Rect(x, y, width, height), CellStyle.Default, _Title + "  (Enter=save, Esc=cancel)");
 
             int innerWidth = width - 4;
-            int innerHeight = height - 4;
+            int innerHeight = height - 5;
             CellBuffer buffer = new CellBuffer(innerWidth, innerHeight);
             _Form.Render(new BufferSurface(buffer));
 
@@ -157,12 +158,19 @@ namespace S3Drive.Tui
                     surface.Set(x + 2 + column, y + 2 + row, buffer.Get(column, row));
                 }
             }
+
+            if (_Error != null)
+            {
+                string message = "! " + _Error;
+                if (message.Length > innerWidth) message = message.Substring(0, innerWidth);
+                surface.DrawText(x + 2, y + height - 2, message, CellStyle.Default.WithForeground(Color.FromPalette(9)));
+            }
         }
 
         private void Submit()
         {
-            string? error = _Form.Validate();
-            if (error != null) return;
+            _Error = _Form.Validate();
+            if (_Error != null) return;
 
             DriveFormResult result = new DriveFormResult
             {

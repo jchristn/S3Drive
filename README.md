@@ -48,6 +48,12 @@ only choosing **Exit** from the tray does.
 - **Menu-driven TUI** for configuration and live monitoring, plus a **system tray agent** with
   About, mount/unmount, and share/unshare controls.
 
+## Platform support
+
+**S3Drive is Windows-only.** It mounts the drive through [Dokan](https://github.com/dokan-dev/dokany),
+a Windows user-mode filesystem driver, so it runs only on Windows. There is **no FUSE (macOS/Linux)
+version planned** — S3Drive is not intended to be cross-platform.
+
 ## Requirements
 
 - Windows 10/11 (x64).
