@@ -596,10 +596,7 @@ namespace S3Drive.Core.FileSystem
                 RunCopy(key, destination);
             }
 
-            foreach (string key in keys)
-            {
-                RunDelete(key);
-            }
+            RunDeleteMany(keys);
 
             _Cache.InvalidatePrefix(oldPrefix);
             _Cache.InvalidatePrefix(newPrefix);
@@ -696,6 +693,13 @@ namespace S3Drive.Core.FileSystem
         private void RunDelete(string key)
         {
             _Store.DeleteAsync(key, _Token).GetAwaiter().GetResult();
+        }
+
+        private void RunDeleteMany(IReadOnlyList<string> keys)
+        {
+            if (keys.Count == 0) return;
+            _Store.DeleteManyAsync(keys, _Token).GetAwaiter().GetResult();
+            S3DriveLog.Info("delete-multiple (" + keys.Count + ")");
         }
 
         private void RunCopy(string sourceKey, string destinationKey)

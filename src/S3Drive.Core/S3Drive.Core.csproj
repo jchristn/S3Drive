@@ -10,6 +10,7 @@
 
 
   <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="4.0.102.1" />
     <PackageReference Include="Blobject.AmazonS3" Version="5.0.21" />
     <PackageReference Include="DokanNet" Version="2.3.0.3" />
     <PackageReference Include="Padlock" Version="1.0.4" />

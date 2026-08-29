@@ -5,9 +5,14 @@ namespace S3Drive.Core.Storage
     using System.IO;
     using System.Threading;
     using System.Threading.Tasks;
+    using Amazon;
+    using Amazon.Runtime;
+    using Amazon.S3;
+    using Amazon.S3.Model;
     using Blobject.AmazonS3;
     using Blobject.Core;
     using S3Drive.Core.Configuration;
+    using S3Drive.Core.Diagnostics;
 
     /// <summary>
     /// An <see cref="IS3Store"/> backed by Blobject's Amazon S3 client. Supports both real AWS
@@ -19,8 +24,11 @@ namespace S3Drive.Core.Storage
     {
         private const string ContentType = "application/octet-stream";
         private const string DefaultRegion = "us-east-1";
+        private const int MaxDeleteBatchSize = 1000;
 
         private readonly AmazonS3BlobClient _Client;
+        private readonly IAmazonS3 _S3Client;
+        private readonly string _Bucket;
         private bool _Disposed;
 
         /// <summary>
@@ -38,6 +46,8 @@ namespace S3Drive.Core.Storage
             if (string.IsNullOrEmpty(profile.AccessKey)) throw new ArgumentException("Access key must be provided.", nameof(profile));
 
             _Client = new AmazonS3BlobClient(BuildSettings(profile, secretKey));
+            _S3Client = BuildS3Client(profile, secretKey);
+            _Bucket = profile.Bucket;
         }
 
         /// <inheritdoc />
@@ -186,6 +196,27 @@ namespace S3Drive.Core.Storage
         }
 
         /// <inheritdoc />
+        public async Task DeleteManyAsync(IReadOnlyCollection<string> keys, CancellationToken token)
+        {
+            if (keys == null) throw new ArgumentNullException(nameof(keys));
+            if (keys.Count == 0) return;
+
+            List<string> batch = new List<string>(Math.Min(keys.Count, MaxDeleteBatchSize));
+            foreach (string key in keys)
+            {
+                if (string.IsNullOrEmpty(key)) continue;
+                batch.Add(key);
+                if (batch.Count == MaxDeleteBatchSize)
+                {
+                    await DeleteBatchAsync(batch, token).ConfigureAwait(false);
+                    batch.Clear();
+                }
+            }
+
+            if (batch.Count > 0) await DeleteBatchAsync(batch, token).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
         public async Task CopyAsync(string sourceKey, string destinationKey, CancellationToken token)
         {
             if (sourceKey == null) throw new ArgumentNullException(nameof(sourceKey));
@@ -213,13 +244,57 @@ namespace S3Drive.Core.Storage
         }
 
         /// <summary>
-        /// Disposes the underlying storage client.
+        /// Disposes the underlying storage clients.
         /// </summary>
         public void Dispose()
         {
             if (_Disposed) return;
             _Disposed = true;
             _Client.Dispose();
+            _S3Client.Dispose();
+        }
+
+        private async Task DeleteBatchAsync(List<string> batch, CancellationToken token)
+        {
+            try
+            {
+                DeleteObjectsRequest request = new DeleteObjectsRequest();
+                request.BucketName = _Bucket;
+                request.Quiet = true;
+                foreach (string key in batch) request.AddKey(key);
+
+                await _S3Client.DeleteObjectsAsync(request, token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (DeleteObjectsException exception)
+            {
+                // The multi-object delete partially succeeded: the successful keys are gone. On S3,
+                // deleting a missing key is a no-op, but some endpoints (for example Less3) report
+                // an absent key as a per-key error. Retry only the keys that were reported as
+                // errors, individually and existence-guarded, so a merely-absent key is a no-op and
+                // a genuine failure gets a second attempt.
+                List<DeleteError> errors = exception.Response.DeleteErrors;
+                foreach (DeleteError error in errors)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await DeleteAsync(error.Key, token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception exception)
+            {
+                // The endpoint does not implement multi-object delete at all; fall back to deleting
+                // each key individually so the operation still completes. Deleting a key that no
+                // longer exists is not an error, so each delete is existence-guarded.
+                S3DriveLog.Warn("multi-object delete unavailable (" + batch.Count + " keys), deleting individually: " + exception.Message);
+                foreach (string key in batch)
+                {
+                    token.ThrowIfCancellationRequested();
+                    await DeleteAsync(key, token).ConfigureAwait(false);
+                }
+            }
         }
 
         private static S3Entry ToEntry(BlobMetadata metadata, string key)
@@ -238,6 +313,31 @@ namespace S3Drive.Core.Storage
                 LastModifiedUtc = metadata.LastUpdateUtc ?? DateTime.UtcNow,
                 ETag = metadata.ETag
             };
+        }
+
+        private static IAmazonS3 BuildS3Client(DriveProfile profile, string secretKey)
+        {
+            string region = string.IsNullOrEmpty(profile.Region) ? DefaultRegion : profile.Region;
+            BasicAWSCredentials credentials = new BasicAWSCredentials(profile.AccessKey, secretKey);
+            AmazonS3Config config = new AmazonS3Config();
+
+            if (profile.Provider == S3ProviderEnum.AwsS3 || string.IsNullOrEmpty(profile.ServiceUrl))
+            {
+                config.RegionEndpoint = RegionEndpoint.GetBySystemName(region);
+            }
+            else
+            {
+                Uri uri = new Uri(profile.ServiceUrl!, UriKind.Absolute);
+                string scheme = profile.UseSsl ? "https" : "http";
+                string authority = uri.IsDefaultPort ? uri.Host : uri.Host + ":" + uri.Port;
+
+                config.ServiceURL = scheme + "://" + authority;
+                config.ForcePathStyle = profile.UsePathStyle;
+                config.UseHttp = !profile.UseSsl;
+                config.AuthenticationRegion = region;
+            }
+
+            return new AmazonS3Client(credentials, config);
         }
 
         private static AwsSettings BuildSettings(DriveProfile profile, string secretKey)

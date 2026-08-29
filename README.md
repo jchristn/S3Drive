@@ -146,7 +146,7 @@ from <https://github.com/dokan-dev/dokany>.
 | [Dokany](https://github.com/dokan-dev/dokany/releases) (kernel driver, separate install) | User-mode filesystem driver | Dual LGPL-2.1 / MIT (also offered commercially) |
 | [DokanNet](https://github.com/dokan-dev/dokan-dotnet) | Managed Dokan wrapper | MIT |
 | [Blobject](https://github.com/jchristn/blobject) (`Blobject.Core`, `Blobject.AmazonS3`) | S3 / S3-compatible storage | MIT |
-| [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) (`AWSSDK.S3`, via Blobject) | S3 protocol client | Apache-2.0 |
+| [AWS SDK for .NET](https://github.com/aws/aws-sdk-net) (`AWSSDK.S3`) | S3 protocol client (used directly for multi-object delete, and via Blobject) | Apache-2.0 |
 | [Padlock](https://github.com/jchristn/padlock) | Named locks | MIT |
 | [SyslogLogging](https://github.com/jchristn/loggingmodule) | Logging | MIT |
 | [PrettyId](https://github.com/jchristn/prettyid) | Identifier generation | MIT |

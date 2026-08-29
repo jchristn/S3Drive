@@ -296,6 +296,10 @@ namespace Test.Automated.Tests
                     Assert.True(store.Has("e/sub/b.txt"));
                     Assert.False(store.Has("d/a.txt"));
                     Assert.False(store.Has("d/sub/b.txt"));
+
+                    // Descendants of the renamed directory are removed in a single batched
+                    // multi-object delete rather than one request per key.
+                    Assert.Equal(1, store.DeleteManyCallCount);
                 }
                 finally
                 {

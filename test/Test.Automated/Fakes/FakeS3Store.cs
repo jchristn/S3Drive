@@ -210,6 +210,30 @@ namespace Test.Automated.Fakes
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// The number of times <see cref="DeleteManyAsync"/> has been invoked (for assertions).
+        /// </summary>
+        public int DeleteManyCallCount { get; private set; }
+
+        /// <inheritdoc />
+        public Task DeleteManyAsync(IReadOnlyCollection<string> keys, CancellationToken token)
+        {
+            if (keys == null) throw new ArgumentNullException(nameof(keys));
+
+            lock (_Sync)
+            {
+                DeleteManyCallCount++;
+                foreach (string key in keys)
+                {
+                    if (string.IsNullOrEmpty(key)) continue;
+                    _Objects.Remove(key);
+                    _Modified.Remove(key);
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
         /// <inheritdoc />
         public Task CopyAsync(string sourceKey, string destinationKey, CancellationToken token)
         {

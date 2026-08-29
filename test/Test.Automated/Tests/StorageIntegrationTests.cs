@@ -30,6 +30,7 @@ namespace Test.Automated.Tests
                 runner.Skip("Storage connectivity", reason);
                 runner.Skip("Storage put/head/get/list/copy/delete", reason);
                 runner.Skip("Storage file upload and download", reason);
+                runner.Skip("Storage multi-object delete", reason);
                 return;
             }
 
@@ -78,6 +79,31 @@ namespace Test.Automated.Tests
                     await store.DeleteAsync(key, token);
                     Assert.False(await store.ExistsAsync(key, token));
                     await store.DeleteAsync(copyKey, token);
+                }
+            });
+
+            runner.Add("Storage multi-object delete", async () =>
+            {
+                using (BlobS3Store store = new BlobS3Store(config.Profile, config.Secret))
+                {
+                    CancellationToken token = CancellationToken.None;
+                    System.Collections.Generic.List<string> keys = new System.Collections.Generic.List<string>();
+                    for (int i = 0; i < 5; i++)
+                    {
+                        string key = Prefix + "bulk/" + i + ".txt";
+                        keys.Add(key);
+                        await store.PutAsync(key, Encoding.UTF8.GetBytes("bulk " + i), token);
+                    }
+
+                    // Deleting a key that no longer exists must be tolerated by the batch delete.
+                    keys.Add(Prefix + "bulk/missing.txt");
+
+                    await store.DeleteManyAsync(keys, token);
+
+                    foreach (string key in keys)
+                    {
+                        Assert.False(await store.ExistsAsync(key, token), key + " should be deleted");
+                    }
                 }
             });
 

@@ -84,6 +84,16 @@ namespace S3Drive.Core.Storage
         Task DeleteAsync(string key, CancellationToken token);
 
         /// <summary>
+        /// Deletes many objects in as few requests as the endpoint allows, using the S3
+        /// multi-object delete (DeleteObjects) API in batches where the endpoint supports it and
+        /// falling back to individual deletes otherwise. Deleting a key that does not exist is not
+        /// an error. Used for directory rename and other bulk operations.
+        /// </summary>
+        /// <param name="keys">The object keys to delete. Cannot be null; may be empty (a no-op).</param>
+        /// <param name="token">A cancellation token.</param>
+        Task DeleteManyAsync(IReadOnlyCollection<string> keys, CancellationToken token);
+
+        /// <summary>
         /// Copies an object to a new key by reading and rewriting it.
         /// </summary>
         /// <param name="sourceKey">The source key. Cannot be null.</param>

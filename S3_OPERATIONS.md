@@ -13,6 +13,11 @@ which wraps the AWS SDK. The relevant code is `S3Drive.Core.Storage.BlobS3Store`
 `S3Drive.Core.FileSystem.S3DriveFileSystem` (`src/S3Drive.Core/FileSystem/S3DriveFileSystem.cs`),
 which implements Dokan's `IDokanOperations`.
 
+Blobject exposes only single-object operations, so for the one case where S3Drive deletes many
+objects at once — cleaning up after a directory rename — `BlobS3Store` also holds a direct
+`Amazon.S3.IAmazonS3` client (configured from the same profile) and uses the S3 multi-object delete
+(`DeleteObjects`) API. See [Bulk delete](#bulk-delete-multi-object-delete) below.
+
 ## The core mapping
 
 | Filesystem operation (Dokan) | S3Drive method | Blobject call | Underlying S3 request |
@@ -25,7 +30,9 @@ which implements Dokan's `IDokanOperations`.
 | Write (`WriteFile`) → persist on close | stage locally, then `PutFromFileAsync` | `WriteAsync(key, type, length, stream)` | `PutObject` (multipart for large) |
 | Create new object | `PutAsync` / staged then `PutFromFileAsync` | `WriteAsync(...)` | `PutObject` |
 | Delete (`DeleteFile`/`DeleteDirectory`) | `IS3Store.DeleteAsync(key)` | `DeleteAsync(key)` | `DeleteObject` |
-| Rename/move (`MoveFile`) | `CopyAsync` then `DeleteAsync` | `GetAsync` + `WriteAsync`, then `DeleteAsync` | `GetObject` + `PutObject` + `DeleteObject` |
+| Delete many (directory rename cleanup) | `IS3Store.DeleteManyAsync(keys)` | AWS SDK `DeleteObjectsAsync` (direct) | `DeleteObjects` (up to 1000/request) |
+| Rename/move file (`MoveFile`) | `CopyAsync` then `DeleteAsync` | `GetAsync` + `WriteAsync`, then `DeleteAsync` | `GetObject` + `PutObject` + `DeleteObject` |
+| Rename/move directory (`MoveFile`) | `CopyAsync` per key, then `DeleteManyAsync` | `GetAsync`+`WriteAsync` per key, then `DeleteObjectsAsync` | `GetObject`+`PutObject` per key + batched `DeleteObjects` |
 | Create directory (`CreateDirectory`) | write a `prefix/` marker | `WriteAsync(prefix + "/", type, empty)` | `PutObject` (zero bytes) |
 | Connectivity check | `ValidateConnectivityAsync` | `ValidateConnectivity()` | provider probe |
 
@@ -124,6 +131,29 @@ delete is allowed (the file exists; the directory is empty) and mark the handle;
 checks existence first and then issues `DeleteObject`, so deleting a missing object is harmless.
 Directory deletion refuses a non-empty directory (`DirectoryNotEmpty`) by inspecting a listing.
 
+Note that Dokan (like Windows) deletes a multi-file selection one handle at a time, so a bulk
+Explorer delete arrives as many independent `DeleteFile` → `Cleanup` calls, each a single
+`DeleteObject`. There is no single filesystem callback that carries the whole selection, so those
+cannot be coalesced into one request. The one place S3Drive genuinely deletes many objects in a
+single operation is directory-rename cleanup, described next.
+
+### Bulk delete (multi-object delete)
+
+When more than one object is removed as part of a *single* operation, S3Drive uses the S3
+multi-object delete API (`DeleteObjects`, up to 1,000 keys per request) instead of one
+`DeleteObject` per key. This is exposed as `IS3Store.DeleteManyAsync(keys)` and implemented in
+`BlobS3Store` on a direct `Amazon.S3.IAmazonS3` client (Blobject offers only single-key delete).
+Keys are chunked into batches of 1,000. The behavior is designed to be endpoint-agnostic:
+
+- **Full support (AWS S3, MinIO, Less3, …).** One `DeleteObjects` request removes the whole batch.
+- **Partial per-key errors.** The AWS SDK raises `DeleteObjectsException` if any key in the batch is
+  reported as failed. On S3 a missing key is a silent no-op, but some endpoints report an absent key
+  as a per-key error; S3Drive retries only the reported keys individually and existence-guarded, so a
+  merely-absent key is a no-op and a genuine failure gets a second attempt.
+- **No multi-delete support at all.** If the endpoint does not implement `DeleteObjects`, S3Drive
+  logs a warning and falls back to existence-guarded single deletes for the whole batch, so the
+  operation still completes.
+
 ## Rename and move
 
 S3 has no rename or move. `MoveFile` implements it as copy-then-delete:
@@ -132,12 +162,14 @@ S3 has no rename or move. `MoveFile` implements it as copy-then-delete:
   `CopyAsync` is itself a `GetObject` followed by a `PutObject` — the object is downloaded and
   re-uploaded under the new key, then the old one is deleted.
 - **A directory** is renamed by enumerating every descendant key (`ListAllKeysAsync`), copying each
-  to the corresponding key under the new prefix, and then deleting each old key.
+  to the corresponding key under the new prefix, and then deleting the old keys with a single batched
+  multi-object delete (`DeleteManyAsync`, 1,000 keys per `DeleteObjects` request) rather than one
+  `DeleteObject` per key.
 
 Both are correct but not free, and this is the sharpest limitation of the model: renaming a large
-file downloads and re-uploads all of its bytes, and renaming or moving a large tree is O(number of
-objects) round trips. Neither is atomic — an interruption can leave some objects moved and others
-not.
+file downloads and re-uploads all of its bytes, and renaming or moving a large tree still copies
+every descendant object one at a time (the *copy* phase is O(number of objects); only the *delete*
+phase is batched). Neither is atomic — an interruption can leave some objects moved and others not.
 
 ## Volume, security, and no-op operations
 
@@ -170,7 +202,12 @@ cache (see limitations), not from S3 itself.
 - **Whole-object writes.** No append or partial write; every modification is a read-modify-write
   that re-uploads the entire object on close. There are no incremental saves.
 - **Rename/move is copy + delete.** No server-side copy, so a rename re-uploads the whole file, and a
-  directory rename/move is one copy+delete per descendant object — non-atomic and O(n).
+  directory rename/move copies each descendant object individually (O(n), non-atomic). The delete
+  phase is batched with the multi-object delete API (`DeleteObjects`, 1,000 keys/request), but the
+  copy phase is not.
+- **Bulk delete only where the operation is single.** The multi-object delete API is used when one
+  S3Drive operation removes many keys (directory-rename cleanup). A multi-file delete from Explorer
+  arrives as separate per-file callbacks and cannot be coalesced into one request.
 - **Listing is recursive plus client-side folding.** Blobject exposes no delimiter, so a folder
   listing enumerates all keys under the prefix and reconstructs immediate children in code. Deep or
   very large prefixes are proportionally expensive, and there is no exposed control over server-side
