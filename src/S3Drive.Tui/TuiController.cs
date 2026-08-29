@@ -160,6 +160,10 @@ namespace S3Drive.Tui
 
         private async Task StartAsync()
         {
+            // Load and render the drive list first so the Drives pane is populated behind the splash
+            // rather than showing "No drives configured" until the splash is dismissed.
+            await RefreshAsync().ConfigureAwait(false);
+
             if (_ShowSplash)
             {
                 Version? assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
@@ -170,8 +174,6 @@ namespace S3Drive.Tui
                 SplashModal splash = new SplashModal(Constants.ProductName, S3DriveBanner.SplashLines(version));
                 await RequireApp().ShowAsync(splash).ConfigureAwait(false);
             }
-
-            await RefreshAsync().ConfigureAwait(false);
         }
 
         private void ToggleFocus()
