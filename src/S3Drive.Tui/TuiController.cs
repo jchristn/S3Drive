@@ -28,7 +28,7 @@ namespace S3Drive.Tui
     /// </summary>
     internal sealed class TuiController
     {
-        private const int ActivityHeight = 14;
+        private const int ActivityHeight = 21;
         private const int HintHeight = 1;
         private const int FillMax = 1_000_000;
         private const int MaxActivityLines = 2000;
