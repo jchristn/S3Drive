@@ -89,7 +89,9 @@ namespace S3Drive.Agent
 
         private NativeMenuItem BuildDriveItem(DriveStatus drive)
         {
-            NativeMenuItem item = new NativeMenuItem(drive.Name + "  [" + drive.MountState + "]");
+            string letter = FormatLetter(drive.DriveLetter);
+            string label = (letter.Length > 0 ? letter + "  " : string.Empty) + drive.Name + "  [" + drive.MountState + "]";
+            NativeMenuItem item = new NativeMenuItem(label);
 
             NativeMenu sub = new NativeMenu();
             string id = drive.DriveId;
@@ -123,6 +125,17 @@ namespace S3Drive.Agent
             _Host?.Stop();
             if (_Tray != null) _Tray.IsVisible = false;
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
+        }
+
+        private static string FormatLetter(string? driveLetter)
+        {
+            if (string.IsNullOrEmpty(driveLetter)) return string.Empty;
+
+            string trimmed = driveLetter.TrimEnd('\\', ' ');
+            if (trimmed.Length == 0) return string.Empty;
+
+            char letter = char.ToUpperInvariant(trimmed[0]);
+            return letter + ":";
         }
 
         private static WindowIcon? LoadIcon()

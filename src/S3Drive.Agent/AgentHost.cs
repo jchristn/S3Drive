@@ -247,7 +247,8 @@ namespace S3Drive.Agent
                     {
                         DriveId = profile.Id,
                         Name = profile.Name,
-                        MountState = DriveMountStateEnum.Unmounted
+                        MountState = DriveMountStateEnum.Unmounted,
+                        DriveLetter = profile.DriveLetter
                     });
                 }
             }
