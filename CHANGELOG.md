@@ -30,4 +30,7 @@ releases.
   that run against any S3 or S3-compatible endpoint (CLI arguments or `S3DRIVE_TEST_*`
   variables). `test/run-integration.{sh,bat}` exercises them against an ephemeral Less3
   container. A `--mount-test` mode performs a real Dokan mount and drives operating-system-level
-  file operations against the mounted drive (requires Windows and the Dokany driver).
+  file operations against the mounted drive; `--make-config` and `--send-command` drive a full
+  agent end-to-end test (auto-mount from config, then unmount via the command channel). These
+  require Windows and the Dokany driver. Verified end-to-end against Less3: the agent
+  auto-mounted a bucket to a drive letter, round-tripped files through Windows, and unmounted.

@@ -16,6 +16,16 @@ namespace Test.Automated
                 return await MountHarness.RunAsync(storage, GetArg(args, "--drive-letter"));
             }
 
+            if (HasFlag(args, "--make-config"))
+            {
+                return await AgentControl.WriteConfigAsync(storage, GetArg(args, "--drive-letter"));
+            }
+
+            if (HasFlag(args, "--send-command"))
+            {
+                return await AgentControl.SendCommandAsync(GetArg(args, "--send-command") ?? "reload", GetArg(args, "--drive-id"));
+            }
+
             TestRunner runner = new TestRunner();
             KeyMapperTests.Register(runner);
             MetadataCacheTests.Register(runner);
