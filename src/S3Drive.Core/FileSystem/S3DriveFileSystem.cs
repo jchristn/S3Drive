@@ -20,7 +20,6 @@ namespace S3Drive.Core.FileSystem
     /// </summary>
     public sealed class S3DriveFileSystem : IDokanOperations
     {
-        private const long OneTebibyte = 1L << 40;
         private const long OnePebibyte = 1L << 50;
 
         private readonly IS3Store _Store;
@@ -441,9 +440,11 @@ namespace S3Drive.Core.FileSystem
         /// <inheritdoc />
         public NtStatus GetDiskFreeSpace(out long freeBytesAvailable, out long totalNumberOfBytes, out long totalNumberOfFreeBytes, IDokanFileInfo info)
         {
-            freeBytesAvailable = OneTebibyte;
+            // Free must equal total: any ratio at or below 10% free makes Explorer render the
+            // capacity bar red, and S3 has no real usage to report against a quota anyway.
+            freeBytesAvailable = OnePebibyte;
             totalNumberOfBytes = OnePebibyte;
-            totalNumberOfFreeBytes = OneTebibyte;
+            totalNumberOfFreeBytes = OnePebibyte;
             return NtStatus.Success;
         }
 

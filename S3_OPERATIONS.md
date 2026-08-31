@@ -194,8 +194,9 @@ phase is batched). Neither is atomic — an interruption can leave some objects 
 
 Some operations have no meaningful S3 backing and are answered synthetically or ignored:
 
-- `GetDiskFreeSpace` reports large fixed capacity and free space — S3 has no per-bucket quota to
-  report.
+- `GetDiskFreeSpace` reports a large fixed capacity (1 PiB) with all of it free — S3 has no
+  per-bucket quota to report, and reporting anything at or below 10% free would make Explorer
+  render the drive's capacity bar red as a low-disk warning.
 - `GetVolumeInformation` reports a case-preserving, Unicode volume named after the drive.
 - `SetFileAttributes` and `SetFileTime` succeed but do nothing — S3 objects carry no Windows
   attributes, and timestamps come from the object's own last-modified time.

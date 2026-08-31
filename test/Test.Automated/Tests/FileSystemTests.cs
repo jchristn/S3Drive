@@ -344,8 +344,8 @@ namespace Test.Automated.Tests
 
                     Assert.Equal(NtStatus.Success, fs.GetDiskFreeSpace(out long free, out long total, out long totalFree, info));
                     Assert.True(free > 0);
-                    Assert.True(total >= free);
-                    Assert.True(totalFree > 0);
+                    Assert.Equal(total, free);
+                    Assert.Equal(total, totalFree);
 
                     Assert.Equal(NtStatus.Success, fs.LockFile("\\a", 0, 1, info));
                     Assert.Equal(NtStatus.Success, fs.UnlockFile("\\a", 0, 1, info));
