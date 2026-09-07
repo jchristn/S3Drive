@@ -1,6 +1,8 @@
 namespace S3Drive.Agent
 {
     using System;
+    using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Reflection;
     using Avalonia;
@@ -10,6 +12,7 @@ namespace S3Drive.Agent
     using Avalonia.Threading;
     using S3Drive.Core;
     using S3Drive.Core.Configuration;
+    using S3Drive.Core.Diagnostics;
     using S3Drive.Core.Ipc;
 
     /// <summary>
@@ -65,6 +68,8 @@ namespace S3Drive.Agent
             open.Click += OnOpen;
             menu.Items.Add(open);
 
+            menu.Items.Add(BuildOpenInExplorerItem(status));
+
             menu.Items.Add(new NativeMenuItemSeparator());
 
             if (status.Drives.Count == 0)
@@ -85,6 +90,47 @@ namespace S3Drive.Agent
             exit.Click += OnExit;
             menu.Items.Add(exit);
             return menu;
+        }
+
+        private NativeMenuItem BuildOpenInExplorerItem(AgentStatus status)
+        {
+            List<DriveStatus> openable = new List<DriveStatus>();
+            foreach (DriveStatus drive in status.Drives)
+            {
+                if (drive.MountState == DriveMountStateEnum.Mounted && FormatLetter(drive.DriveLetter).Length > 0)
+                {
+                    openable.Add(drive);
+                }
+            }
+
+            NativeMenuItem item = new NativeMenuItem("Open in Explorer");
+
+            if (openable.Count == 0)
+            {
+                item.IsEnabled = false;
+                return item;
+            }
+
+            if (openable.Count == 1)
+            {
+                string path = ExplorerPath(openable[0].DriveLetter);
+                item.Click += (sender, args) => OpenInExplorer(path);
+                return item;
+            }
+
+            NativeMenu sub = new NativeMenu();
+            foreach (DriveStatus drive in openable)
+            {
+                string letter = FormatLetter(drive.DriveLetter);
+                string label = letter + "  " + drive.Name;
+                string path = ExplorerPath(drive.DriveLetter);
+                NativeMenuItem driveItem = new NativeMenuItem(label);
+                driveItem.Click += (sender, args) => OpenInExplorer(path);
+                sub.Items.Add(driveItem);
+            }
+
+            item.Menu = sub;
+            return item;
         }
 
         private NativeMenuItem BuildDriveItem(DriveStatus drive)
@@ -125,6 +171,24 @@ namespace S3Drive.Agent
             _Host?.Stop();
             if (_Tray != null) _Tray.IsVisible = false;
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
+        }
+
+        private static string ExplorerPath(string? driveLetter)
+        {
+            string letter = FormatLetter(driveLetter);
+            return letter + "\\";
+        }
+
+        private static void OpenInExplorer(string path)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", "\"" + path + "\"") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                S3DriveLog.Error("Failed to open " + path + " in Explorer: " + ex.Message);
+            }
         }
 
         private static string FormatLetter(string? driveLetter)
