@@ -9,7 +9,10 @@ namespace S3Drive.Tui
     using TUIKit.Widgets;
 
     /// <summary>
-    /// A modal form for creating or editing a drive connection profile.
+    /// A modal form for creating or editing a drive connection profile. Fields respond to the
+    /// keyboard and the mouse: a click focuses a field (placing the caret, toggling a checkbox, or
+    /// picking a radio option), the wheel moves between fields, and the Save and Cancel buttons are
+    /// clickable.
     /// </summary>
     internal sealed class DriveFormModal : Modal
     {
@@ -17,6 +20,13 @@ namespace S3Drive.Tui
         private readonly Form _Form = new Form();
         private readonly List<TextField?> _TextByIndex;
         private string? _Error;
+
+        // Geometry from the most recent render, used to hit-test mouse events.
+        private Rect _Viewport;
+        private int _ScrollY;
+        private Rect _SaveButton;
+        private Rect _CancelButton;
+        private int _HoveredButton = -1;
 
         private readonly TextField _Name = new TextField();
         private readonly RadioGroup _Provider = new RadioGroup(new string[] { "AwsS3", "S3Compatible" });
@@ -59,7 +69,7 @@ namespace S3Drive.Tui
             _Form.Add("Secret key (blank keeps existing)", _Secret);
             _Form.Add("Use SSL", _UseSsl);
             _Form.Add("Path-style addressing", _UsePathStyle);
-            _Form.Add("Drive letter (e.g. S:)", _DriveLetter, () => _DriveLetter.Value.Trim().Length == 0 ? "Drive letter is required." : null);
+            _Form.Add(OperatingSystem.IsWindows() ? "Drive letter or mount name (e.g. S:)" : "Drive letter or mount name (e.g. mybucket)", _DriveLetter, () => _DriveLetter.Value.Trim().Length == 0 ? "Drive letter or mount name is required." : null);
 
             // Maps each form-field index to its text field (null for non-text fields), so a
             // paste can be inserted into the focused field. Order must match the Add calls above.
@@ -97,6 +107,48 @@ namespace S3Drive.Tui
         }
 
         /// <inheritdoc />
+        public override bool HandleMouse(MouseEvent mouse)
+        {
+            if (mouse == null) throw new ArgumentNullException(nameof(mouse));
+
+            int button = Contains(_SaveButton, mouse.X, mouse.Y) ? 0 : (Contains(_CancelButton, mouse.X, mouse.Y) ? 1 : -1);
+
+            if (mouse.Kind == MouseEventKind.Enter || mouse.Kind == MouseEventKind.Move || mouse.Kind == MouseEventKind.Leave)
+            {
+                _HoveredButton = mouse.Kind == MouseEventKind.Leave ? -1 : button;
+            }
+
+            if (mouse.Kind == MouseEventKind.Press && mouse.Button == MouseButton.Left && button >= 0)
+            {
+                if (button == 0) Submit();
+                else Close(null);
+                return true;
+            }
+
+            if (mouse.Kind == MouseEventKind.Wheel)
+            {
+                // Scroll by moving focus so the viewport follows, rather than letting a field under
+                // the pointer (such as the provider radio group) consume the wheel.
+                int delta = mouse.Button == MouseButton.WheelUp ? -1 : (mouse.Button == MouseButton.WheelDown ? 1 : 0);
+                if (delta == 0 || _Form.FieldCount == 0) return false;
+                _Form.SetFocusedField(Math.Clamp(_Form.FocusedIndex + delta, 0, _Form.FieldCount - 1));
+                return true;
+            }
+
+            if (!Contains(_Viewport, mouse.X, mouse.Y)) return mouse.Kind == MouseEventKind.Press;
+
+            MouseEvent local = new MouseEvent(
+                mouse.Kind,
+                mouse.Button,
+                mouse.X - _Viewport.X,
+                mouse.Y - _Viewport.Y + _ScrollY,
+                mouse.Modifiers,
+                mouse.ClickCount);
+            _Form.HandleMouse(local);
+            return true;
+        }
+
+        /// <inheritdoc />
         public override bool HandlePaste(string text)
         {
             if (string.IsNullOrEmpty(text)) return false;
@@ -128,6 +180,9 @@ namespace S3Drive.Tui
             int x = (size.Width - width) / 2;
             int y = (size.Height - height) / 2;
 
+            // Clear the whole box first so nothing underneath shows through the unpainted columns
+            // between the border and the form content.
+            surface.Fill(new Rect(x, y, width, height), Cell.Blank(CellStyle.Default));
             surface.DrawBox(new Rect(x, y, width, height), CellStyle.Default, _Title + "  (Tab moves, Enter saves, Esc cancels)");
 
             int innerWidth = width - 4;
@@ -148,6 +203,8 @@ namespace S3Drive.Tui
             }
 
             scrollY = Math.Clamp(scrollY, 0, Math.Max(0, contentHeight - viewportHeight));
+            _ScrollY = scrollY;
+            _Viewport = new Rect(x + 2, y + 2, innerWidth, viewportHeight);
 
             for (int row = 0; row < viewportHeight; row++)
             {
@@ -165,11 +222,26 @@ namespace S3Drive.Tui
                 surface.DrawText(x + width - indicator.Length - 2, y, indicator, CellStyle.Default.WithForeground(Color.FromPalette(8)));
             }
 
+            // Save and Cancel buttons, right-aligned on the bottom row; the error shares the row.
+            const string SaveText = "[ Save ]";
+            const string CancelText = "[ Cancel ]";
+            int buttonRow = y + height - 2;
+            int cancelX = x + width - 2 - CancelText.Length;
+            int saveX = cancelX - 2 - SaveText.Length;
+            _SaveButton = new Rect(saveX, buttonRow, SaveText.Length, 1);
+            _CancelButton = new Rect(cancelX, buttonRow, CancelText.Length, 1);
+
+            CellStyle accent = CellStyle.Default.WithBackground(Color.FromPalette(6)).WithForeground(Color.FromPalette(0));
+            CellStyle hover = CellStyle.Default.WithAttribute(CellAttributes.Underline, true);
+            surface.DrawText(saveX, buttonRow, SaveText, _HoveredButton == 0 ? accent : CellStyle.Default.WithForeground(Color.FromPalette(6)).WithAttribute(CellAttributes.Bold, true));
+            surface.DrawText(cancelX, buttonRow, CancelText, _HoveredButton == 1 ? hover : CellStyle.Default);
+
             if (_Error != null)
             {
+                int room = saveX - (x + 2) - 1;
                 string message = "! " + _Error;
-                if (message.Length > innerWidth) message = message.Substring(0, innerWidth);
-                surface.DrawText(x + 2, y + height - 2, message, CellStyle.Default.WithForeground(Color.FromPalette(9)));
+                if (message.Length > room) message = message.Substring(0, Math.Max(0, room));
+                surface.DrawText(x + 2, buttonRow, message, CellStyle.Default.WithForeground(Color.FromPalette(9)));
             }
         }
 
@@ -193,6 +265,11 @@ namespace S3Drive.Tui
             };
 
             Close(result);
+        }
+
+        private static bool Contains(Rect rect, int x, int y)
+        {
+            return x >= rect.X && x < rect.X + rect.Width && y >= rect.Y && y < rect.Y + rect.Height;
         }
 
         private static string? NullIfEmpty(string value)

@@ -10,7 +10,7 @@ namespace S3Drive.Tui
     /// <summary>
     /// A modal that renders multi-line content verbatim (no reflow) in a centered bordered box, with an
     /// optional dimmed hint line at the bottom. Used for the startup splash. Any key dismisses it, so it
-    /// never blocks the user from reaching the console.
+    /// never blocks the user from reaching the console; so does a mouse click.
     /// </summary>
     internal sealed class SplashModal : Modal
     {
@@ -30,7 +30,7 @@ namespace S3Drive.Tui
         /// <param name="hint">An optional dimmed footer hint; empty to omit. Defaults to a dismissal prompt.</param>
         /// <param name="centered">When true, each content line and the hint are horizontally centered. Defaults to true.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="lines"/> is null.</exception>
-        public SplashModal(string title, IReadOnlyList<string> lines, string hint = "Press any key to continue", bool centered = true)
+        public SplashModal(string title, IReadOnlyList<string> lines, string hint = "Press any key or click to continue", bool centered = true)
         {
             _Title = title ?? string.Empty;
             _Lines = lines ?? throw new ArgumentNullException(nameof(lines));
@@ -45,6 +45,18 @@ namespace S3Drive.Tui
         /// <returns>Always true; the key is consumed and the modal closes.</returns>
         public override bool HandleKey(KeyEvent key)
         {
+            Close(0);
+            return true;
+        }
+
+        /// <summary>
+        /// Dismisses the splash on any mouse button press.
+        /// </summary>
+        /// <param name="mouse">The mouse event.</param>
+        /// <returns>True when a press closed the splash; otherwise false.</returns>
+        public override bool HandleMouse(MouseEvent mouse)
+        {
+            if (mouse == null || mouse.Kind != MouseEventKind.Press) return false;
             Close(0);
             return true;
         }

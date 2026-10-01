@@ -22,6 +22,7 @@ namespace S3Drive.Agent
     {
         private AgentHost? _Host;
         private TrayIcon? _Tray;
+        private readonly NativeMenu _Menu = new NativeMenu();
 
         /// <inheritdoc />
         public override void Initialize()
@@ -35,12 +36,13 @@ namespace S3Drive.Agent
             S3DrivePaths paths = new S3DrivePaths();
             _Host = new AgentHost(paths);
             _Host.StatusChanged += OnStatusChanged;
+            PopulateMenu(_Host.CurrentStatus());
 
             _Tray = new TrayIcon
             {
                 ToolTipText = Constants.ProductName + " - " + Constants.Tagline,
                 Icon = LoadIcon(),
-                Menu = BuildMenu(_Host.CurrentStatus()),
+                Menu = _Menu,
                 IsVisible = true
             };
 
@@ -52,13 +54,16 @@ namespace S3Drive.Agent
         {
             Dispatcher.UIThread.Post(() =>
             {
-                if (_Tray != null) _Tray.Menu = BuildMenu(status);
+                // The macOS native menu exporter rejects replacing the tray's menu instance, so
+                // the same menu is kept and its items are rebuilt in place.
+                PopulateMenu(status);
             });
         }
 
-        private NativeMenu BuildMenu(AgentStatus status)
+        private void PopulateMenu(AgentStatus status)
         {
-            NativeMenu menu = new NativeMenu();
+            NativeMenu menu = _Menu;
+            menu.Items.Clear();
 
             NativeMenuItem about = new NativeMenuItem("About");
             about.Click += OnAbout;
@@ -89,7 +94,6 @@ namespace S3Drive.Agent
             NativeMenuItem exit = new NativeMenuItem("Exit");
             exit.Click += OnExit;
             menu.Items.Add(exit);
-            return menu;
         }
 
         private NativeMenuItem BuildOpenInExplorerItem(AgentStatus status)

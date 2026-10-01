@@ -23,10 +23,17 @@ releases.
   Windows volume and can be shared on the network from Windows Explorer; S3Drive does not manage
   sharing itself.
 - `S3Drive.Agent`: an always-on Avalonia system-tray agent (About, per-drive mount/unmount,
-  Exit) that owns all mounts and runs independently of the TUI.
+  Exit) that owns all mounts and runs independently of the TUI. The tray menu is rebuilt in
+  place on status changes; replacing the menu instance crashed the agent on macOS.
 - `S3Drive.Tui`: a TUIKit console for configuring connections, sending mount/unmount commands,
   and live-monitoring status and logs; it starts the agent if it is not already running.
-- `go.bat` developer script: builds the solution and launches the TUI.
+- `go.bat` developer script: builds the solution and launches the TUI; `go.sh` is the bash
+  equivalent.
+- TUI mouse support (TUIKit 1.1.1): click a pane to focus it, click or use the arrow keys to
+  highlight a drive (Enter or double-click edits it), click any shortcut hint, click fields,
+  checkboxes, and Save/Cancel in the drive form, and click dialog buttons. Drag to select text
+  and press Ctrl+C to copy; F12 hands the mouse back to the terminal. Drive actions now apply to
+  the highlighted drive instead of prompting for one.
 - `Test.Automated`: 73 tests covering key mapping, caching, configuration, cryptography,
   locking, sharing, the IPC channel, and the Dokan filesystem, plus storage integration tests
   that run against any S3 or S3-compatible endpoint (CLI arguments or `S3DRIVE_TEST_*`

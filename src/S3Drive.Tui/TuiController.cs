@@ -22,9 +22,12 @@ namespace S3Drive.Tui
 
     /// <summary>
     /// Builds and drives the TUI: a Drives pane and an Activity pane, each with its own keyboard
-    /// shortcut bar. Tab moves focus between the two panes; the focused pane's shortcuts are active
-    /// and its bar is highlighted. Activity tails the shared log file so operations happening in the
-    /// agent and the TUI are visible, and can be copied to the clipboard.
+    /// shortcut bar. Tab or a click moves focus between the two panes; the focused pane's shortcuts
+    /// are active and its bar is highlighted. The Drives pane has a highlighted row (moved with the
+    /// arrow keys, a click, or the wheel) that the drive actions apply to, and every shortcut hint is
+    /// clickable. Activity tails the shared log file so operations happening in the agent and the TUI
+    /// are visible, and can be copied to the clipboard (all of it with 'c', or a mouse drag-selection
+    /// with Ctrl+C).
     /// </summary>
     internal sealed class TuiController
     {
@@ -40,15 +43,18 @@ namespace S3Drive.Tui
         private readonly object _ActivitySync = new object();
         private readonly List<string> _ActivityLines = new List<string>();
 
-        private readonly Pane _Content = new Pane("content");
+        private const string DrivesRegion = "content";
+        private const string ActivityRegion = "log";
+
+        private readonly DriveListView _Drives = new DriveListView();
         private readonly Pane _Log = new Pane("log");
+        private readonly ActivityView _Activity;
         private readonly HintBar _DrivesHints;
         private readonly HintBar _ActivityHints;
 
         private TuiApplication? _App;
         private S3DriveSettings _Settings = new S3DriveSettings();
         private AgentStatus? _Status;
-        private List<string> _LastContentLines = new List<string>();
         private bool _ActivityFocused;
 
         private string? _LogPath;
@@ -67,26 +73,32 @@ namespace S3Drive.Tui
             _Protector = new CredentialProtector(paths.MachineKeyFile);
             _ShowSplash = showSplash;
 
-            _DrivesHints = new HintBar("Drives", new List<KeyValuePair<string, string>>
+            _Activity = new ActivityView(_Log);
+            _Drives.Activated += id => Launch(EditDriveAsync);
+            _Drives.Clicked += () => FocusRegion(DrivesRegion);
+
+            // Clicking a hint focuses its pane before running the action, so a click always acts
+            // on the pane the bar belongs to.
+            _DrivesHints = new HintBar("Drives", () => FocusRegion(DrivesRegion), new List<HintItem>
             {
-                new KeyValuePair<string, string>("Tab", "Activity"),
-                new KeyValuePair<string, string>("c", "Add"),
-                new KeyValuePair<string, string>("e", "Edit"),
-                new KeyValuePair<string, string>("d", "Delete"),
-                new KeyValuePair<string, string>("m", "Mount"),
-                new KeyValuePair<string, string>("u", "Unmount"),
-                new KeyValuePair<string, string>("r", "Refresh"),
-                new KeyValuePair<string, string>("F1", "Help"),
-                new KeyValuePair<string, string>("^Q", "Quit")
+                new HintItem("Tab", "Activity", () => FocusRegion(ActivityRegion)),
+                new HintItem("c", "Add", OnDrives(AddDriveAsync)),
+                new HintItem("e", "Edit", OnDrives(EditDriveAsync)),
+                new HintItem("d", "Delete", OnDrives(DeleteDriveAsync)),
+                new HintItem("m", "Mount", OnDrives(MountDriveAsync)),
+                new HintItem("u", "Unmount", OnDrives(UnmountDriveAsync)),
+                new HintItem("r", "Refresh", () => Launch(RefreshAsync)),
+                new HintItem("F1", "Help", () => Launch(HelpAsync)),
+                new HintItem("^Q", "Quit", Quit)
             });
 
-            _ActivityHints = new HintBar("Activity", new List<KeyValuePair<string, string>>
+            _ActivityHints = new HintBar("Activity", () => FocusRegion(ActivityRegion), new List<HintItem>
             {
-                new KeyValuePair<string, string>("Tab", "Drives"),
-                new KeyValuePair<string, string>("c", "Copy"),
-                new KeyValuePair<string, string>("r", "Refresh"),
-                new KeyValuePair<string, string>("F1", "Help"),
-                new KeyValuePair<string, string>("^Q", "Quit")
+                new HintItem("Tab", "Drives", () => FocusRegion(DrivesRegion)),
+                new HintItem("c", "Copy", () => { FocusRegion(ActivityRegion); Launch(CopyActivityAsync); }),
+                new HintItem("r", "Refresh", () => Launch(RefreshAsync)),
+                new HintItem("F1", "Help", () => Launch(HelpAsync)),
+                new HintItem("^Q", "Quit", Quit)
             });
 
             _DrivesHints.Focused = true;
@@ -101,6 +113,16 @@ namespace S3Drive.Tui
         {
             _App = app;
             app.Theme = Theme.Dark;
+
+            // Mouse: clicks focus panes, pick drives, press hint buttons, and drive the modals.
+            // Drag-select text in a pane and press Ctrl+C to copy it; F12 hands the mouse back to
+            // the terminal for its own native selection.
+            app.MouseCaptureEnabled = true;
+            app.EnableMouseRouting = true;
+            app.MouseTextSelectionEnabled = true;
+            app.FocusChanged += OnFocusChanged;
+            _Drives.BaseStyle = app.Theme.Text;
+            _Activity.BaseStyle = app.Theme.Text;
 
             // The header shows the "s3drive" ASCII-art wordmark on the left with the tagline and link
             // to its right, then a blank separator row before the Drives pane beneath it.
@@ -138,13 +160,15 @@ namespace S3Drive.Tui
                 .Build();
 
             app.Bind("header", header);
-            app.BindPane("content", _Content);
+            // Both panes are focusable, so binding order sets tab order and Drives starts focused.
+            app.Bind(DrivesRegion, _Drives);
             app.Bind("driveshints", _DrivesHints);
-            app.BindPane("log", _Log);
+            app.Bind(ActivityRegion, _Activity);
             app.Bind("activityhints", _ActivityHints);
 
             app.Bind("ctrl+q", app.Quit);
-            app.Bind("tab", ToggleFocus);
+            app.Bind("tab", () => app.FocusNext());
+            app.Bind("f12", () => app.ToggleMouseCapture());
             app.Bind("r", () => Launch(RefreshAsync));
             app.Bind("f1", () => Launch(HelpAsync));
             app.Bind("c", OnC);
@@ -176,12 +200,31 @@ namespace S3Drive.Tui
             }
         }
 
-        private void ToggleFocus()
+        private void OnFocusChanged(string? region)
         {
-            _ActivityFocused = !_ActivityFocused;
+            _ActivityFocused = string.Equals(region, ActivityRegion, StringComparison.Ordinal);
             _DrivesHints.Focused = !_ActivityFocused;
             _ActivityHints.Focused = _ActivityFocused;
-            _App?.Post(() => { });
+        }
+
+        private void FocusRegion(string region)
+        {
+            TuiApplication app = RequireApp();
+            if (!string.Equals(app.FocusedRegion, region, StringComparison.Ordinal)) app.Focus(region);
+        }
+
+        private Action OnDrives(Func<Task> action)
+        {
+            return () =>
+            {
+                FocusRegion(DrivesRegion);
+                Launch(action);
+            };
+        }
+
+        private void Quit()
+        {
+            RequireApp().Quit();
         }
 
         private void OnC()
@@ -328,46 +371,21 @@ namespace S3Drive.Tui
 
         private void RenderContent()
         {
-            List<string> lines = BuildContentLines();
-            if (SameLines(lines, _LastContentLines)) return;
-            _LastContentLines = lines;
-
-            _Content.Clear();
-            foreach (string line in lines)
-            {
-                _Content.WriteLine(line);
-            }
-        }
-
-        private List<string> BuildContentLines()
-        {
-            List<string> lines = new List<string>();
-            if (_Settings.Drives.Count == 0)
-            {
-                lines.Add("No drives configured. Press 'c' to add one.");
-                return lines;
-            }
-
-            lines.Add(Row("Name", "Provider", "Bucket", "Letter", "Mount"));
+            List<string> rows = new List<string>();
+            List<string> ids = new List<string>();
             foreach (DriveProfile profile in _Settings.Drives)
             {
                 DriveStatus? status = FindStatus(profile.Id);
                 string mount = status?.MountState.ToString() ?? "Unmounted";
-                lines.Add(Row(profile.Name, profile.Provider.ToString(), profile.Bucket, profile.DriveLetter, mount));
+                rows.Add(Row(profile.Name, profile.Provider.ToString(), profile.Bucket, profile.DriveLetter, mount));
+                ids.Add(profile.Id);
             }
 
-            return lines;
-        }
-
-        private static bool SameLines(List<string> a, List<string> b)
-        {
-            if (a.Count != b.Count) return false;
-            for (int i = 0; i < a.Count; i++)
-            {
-                if (!string.Equals(a[i], b[i], StringComparison.Ordinal)) return false;
-            }
-
-            return true;
+            _Drives.SetRows(
+                Row("Name", "Provider", "Bucket", "Mount at", "State"),
+                rows,
+                ids,
+                "No drives configured. Press 'c' (or click Add below) to add one.");
         }
 
         private async Task AddDriveAsync()
@@ -382,11 +400,12 @@ namespace S3Drive.Tui
             _Settings.Drives.Add(profile);
             await SaveAndReloadAsync().ConfigureAwait(false);
             await RefreshAsync().ConfigureAwait(false);
+            app.Post(() => _Drives.Select(profile.Id));
         }
 
         private async Task EditDriveAsync()
         {
-            DriveProfile? profile = await SelectDriveAsync("Edit which drive?").ConfigureAwait(false);
+            DriveProfile? profile = SelectedDrive();
             if (profile == null) return;
 
             TuiApplication app = RequireApp();
@@ -401,12 +420,13 @@ namespace S3Drive.Tui
 
         private async Task DeleteDriveAsync()
         {
-            DriveProfile? profile = await SelectDriveAsync("Delete which drive?").ConfigureAwait(false);
+            DriveProfile? profile = SelectedDrive();
             if (profile == null) return;
 
             TuiApplication app = RequireApp();
-            bool confirmed = await app.ConfirmAsync("Delete drive '" + profile.Name + "'?", "Delete", "Cancel").ConfigureAwait(false);
-            if (!confirmed) return;
+            ButtonDialogModal confirm = new ButtonDialogModal("Delete drive", "Delete drive '" + profile.Name + "'?", new List<string> { "Delete", "Cancel" }, 1);
+            int choice = await app.ShowAsync<int>(confirm).ConfigureAwait(false);
+            if (choice != 0) return;
 
             await SendAsync(AgentCommandTypeEnum.Unmount, profile.Id).ConfigureAwait(false);
             _Settings.Drives.Remove(profile);
@@ -416,12 +436,12 @@ namespace S3Drive.Tui
 
         private async Task MountDriveAsync()
         {
-            await CommandOnSelectedAsync("Mount which drive?", AgentCommandTypeEnum.Mount).ConfigureAwait(false);
+            await CommandOnSelectedAsync(AgentCommandTypeEnum.Mount).ConfigureAwait(false);
         }
 
         private async Task UnmountDriveAsync()
         {
-            await CommandOnSelectedAsync("Unmount which drive?", AgentCommandTypeEnum.Unmount).ConfigureAwait(false);
+            await CommandOnSelectedAsync(AgentCommandTypeEnum.Unmount).ConfigureAwait(false);
         }
 
         private async Task HelpAsync()
@@ -429,19 +449,21 @@ namespace S3Drive.Tui
             TuiApplication app = RequireApp();
             string help = "S3Drive TUI\n\n"
                 + "The tray agent owns all mounts and keeps running when this window is closed.\n\n"
-                + "Tab                 switch focus between the Drives and Activity panes\n"
-                + "Drives:  c add   e edit   d delete   m mount   u unmount\n"
-                + "Activity: c copy the activity log to the clipboard\n"
-                + "r refresh    F1 help    Ctrl+Q quit\n\n"
+                + "Tab or click       switch focus between the Drives and Activity panes\n"
+                + "Drives:   Up/Down or click to highlight a drive; Enter or double-click edits it\n"
+                + "          c add   e edit   d delete   m mount   u unmount (highlighted drive)\n"
+                + "Activity: c copy the whole activity log; or drag to select text, then Ctrl+C\n"
+                + "r refresh    F1 help    F12 toggle mouse capture    Ctrl+Q quit\n"
+                + "Every shortcut in the bars beneath the panes can also be clicked.\n\n"
                 + "One drive maps to one bucket; configuring a drive mounts it automatically.\n"
                 + "Works with AWS S3 and S3-compatible endpoints (Less3, Ceph, MinIO, and others).\n"
                 + "To share a mounted drive on the network, use Windows Explorer.";
-            await app.ShowAsync(new MessageModal("Help", help, new List<string> { "OK" })).ConfigureAwait(false);
+            await app.ShowAsync(new ButtonDialogModal("Help", help, new List<string> { "OK" })).ConfigureAwait(false);
         }
 
-        private async Task CommandOnSelectedAsync(string prompt, AgentCommandTypeEnum commandType)
+        private async Task CommandOnSelectedAsync(AgentCommandTypeEnum commandType)
         {
-            DriveProfile? profile = await SelectDriveAsync(prompt).ConfigureAwait(false);
+            DriveProfile? profile = SelectedDrive();
             if (profile == null) return;
 
             await SendAsync(commandType, profile.Id).ConfigureAwait(false);
@@ -449,20 +471,17 @@ namespace S3Drive.Tui
             await RefreshAsync().ConfigureAwait(false);
         }
 
-        private async Task<DriveProfile?> SelectDriveAsync(string title)
+        private DriveProfile? SelectedDrive()
         {
-            if (_Settings.Drives.Count == 0) return null;
+            string? id = _Drives.SelectedId;
+            if (id == null) return null;
 
-            TuiApplication app = RequireApp();
-            string[] names = new string[_Settings.Drives.Count];
-            for (int i = 0; i < _Settings.Drives.Count; i++)
+            foreach (DriveProfile profile in _Settings.Drives)
             {
-                names[i] = _Settings.Drives[i].Name + " (" + _Settings.Drives[i].Bucket + ")";
+                if (string.Equals(profile.Id, id, StringComparison.Ordinal)) return profile;
             }
 
-            int index = await app.SelectAsync(title, names).ConfigureAwait(false);
-            if (index < 0 || index >= _Settings.Drives.Count) return null;
-            return _Settings.Drives[index];
+            return null;
         }
 
         private async Task ApplyAsync(DriveProfile profile, DriveFormResult result, string? existingSecret)
@@ -535,11 +554,11 @@ namespace S3Drive.Tui
         private static string Row(string name, string provider, string bucket, string letter, string mount)
         {
             return string.Format(
-                "{0,-20} {1,-14} {2,-22} {3,-8} {4}",
+                "{0,-20} {1,-14} {2,-22} {3,-14} {4}",
                 Trim(name, 20),
                 Trim(provider, 14),
                 Trim(bucket, 22),
-                Trim(letter, 8),
+                Trim(letter, 14),
                 mount);
         }
 
