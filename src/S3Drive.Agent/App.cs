@@ -27,6 +27,8 @@ namespace S3Drive.Agent
         /// <inheritdoc />
         public override void Initialize()
         {
+            // Shown by macOS in place of the default "Avalonia Application".
+            Name = Constants.ProductName;
             Styles.Add(new FluentTheme());
         }
 

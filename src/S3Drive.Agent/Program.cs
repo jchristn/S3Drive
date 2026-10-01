@@ -69,7 +69,12 @@ namespace S3Drive.Agent
 
         public static AppBuilder BuildAvaloniaApp()
         {
-            return AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
+            // On macOS the agent lives only in the menu bar: no Dock icon or app menu, matching the
+            // tray-only behavior on Windows.
+            return AppBuilder.Configure<App>()
+                .UsePlatformDetect()
+                .With(new MacOSPlatformOptions { ShowInDock = false })
+                .LogToTrace();
         }
     }
 }
