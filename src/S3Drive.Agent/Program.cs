@@ -34,9 +34,11 @@ namespace S3Drive.Agent
             }
 
             S3DriveLog.Info("S3Drive agent starting.");
+            AgentTelemetry telemetry = AgentTelemetry.Start(LoadTelemetrySettings(paths));
             try
             {
                 using (instance)
+                using (telemetry)
                 {
                     return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
                 }
@@ -51,6 +53,20 @@ namespace S3Drive.Agent
                 S3DriveLog.Info("S3Drive agent exiting.");
                 S3DriveLog.Flush();
                 S3DriveLog.Dispose();
+            }
+        }
+
+        private static TelemetrySettings LoadTelemetrySettings(S3DrivePaths paths)
+        {
+            try
+            {
+                SettingsManager manager = new SettingsManager(paths);
+                return manager.LoadAsync().GetAwaiter().GetResult().Telemetry;
+            }
+            catch (Exception ex)
+            {
+                S3DriveLog.Warn("Could not read telemetry settings; using defaults: " + ex.Message);
+                return new TelemetrySettings();
             }
         }
 

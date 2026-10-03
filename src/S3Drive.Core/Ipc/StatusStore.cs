@@ -8,6 +8,7 @@ namespace S3Drive.Core.Ipc
     using System.Threading.Tasks;
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Serialization;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// Reads and writes the agent-published status document. Writes are atomic; reads tolerate a
@@ -27,20 +28,33 @@ namespace S3Drive.Core.Ipc
             if (paths == null) throw new ArgumentNullException(nameof(paths));
             if (status == null) throw new ArgumentNullException(nameof(status));
 
-            paths.EnsureDirectories();
-
-            string json = JsonSerializer.Serialize(status, S3DriveJson.Options);
-            string finalPath = paths.StatusFile;
-            string tempPath = finalPath + ".tmp";
-
-            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            using (TelemetryScope scope = S3DriveTelemetry.StartIpc(TelemetryNames.IpcStatusWrite))
             {
-                await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
-                await writer.FlushAsync(token).ConfigureAwait(false);
-            }
+                try
+                {
+                    paths.EnsureDirectories();
 
-            File.Move(tempPath, finalPath, true);
+                    string json = JsonSerializer.Serialize(status, S3DriveJson.Options);
+                    string finalPath = paths.StatusFile;
+                    string tempPath = finalPath + ".tmp";
+
+                    using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                    {
+                        await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
+                        await writer.FlushAsync(token).ConfigureAwait(false);
+                    }
+
+                    File.Move(tempPath, finalPath, true);
+                    scope.SetTag(TelemetryNames.AttrCount, status.Drives.Count);
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
         }
 
         /// <summary>
@@ -55,22 +69,36 @@ namespace S3Drive.Core.Ipc
             if (paths == null) throw new ArgumentNullException(nameof(paths));
             if (!File.Exists(paths.StatusFile)) return null;
 
-            try
+            using (TelemetryScope scope = S3DriveTelemetry.StartIpc(TelemetryNames.IpcStatusRead))
             {
-                using (FileStream stream = new FileStream(paths.StatusFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                try
                 {
-                    string json = await reader.ReadToEndAsync(token).ConfigureAwait(false);
-                    return JsonSerializer.Deserialize<AgentStatus>(json, S3DriveJson.Options);
+                    using (FileStream stream = new FileStream(paths.StatusFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
+                    {
+                        string json = await reader.ReadToEndAsync(token).ConfigureAwait(false);
+                        AgentStatus? status = JsonSerializer.Deserialize<AgentStatus>(json, S3DriveJson.Options);
+                        scope.Complete(TelemetryNames.OutcomeSuccess);
+                        return status;
+                    }
                 }
-            }
-            catch (IOException)
-            {
-                return null;
-            }
-            catch (JsonException)
-            {
-                return null;
+                catch (IOException ex)
+                {
+                    scope.RecordException(ex);
+                    scope.Complete(TelemetryNames.OutcomeError);
+                    return null;
+                }
+                catch (JsonException ex)
+                {
+                    scope.RecordException(ex);
+                    scope.Complete(TelemetryNames.OutcomeError);
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
             }
         }
     }

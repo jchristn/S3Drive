@@ -11,6 +11,7 @@ namespace S3Drive.Core.Configuration
         private int _MetadataCacheSeconds = 5;
         private long _MultipartThresholdBytes = 16L * 1024 * 1024;
         private LoggingSettings _Logging = new LoggingSettings();
+        private TelemetrySettings _Telemetry = new TelemetrySettings();
         private List<DriveProfile> _Drives = new List<DriveProfile>();
 
         /// <summary>
@@ -25,6 +26,15 @@ namespace S3Drive.Core.Configuration
         {
             get { return _Logging; }
             set { _Logging = value ?? new LoggingSettings(); }
+        }
+
+        /// <summary>
+        /// Telemetry (metrics, traces, logs) export configuration. Never null.
+        /// </summary>
+        public TelemetrySettings Telemetry
+        {
+            get { return _Telemetry; }
+            set { _Telemetry = value ?? new TelemetrySettings(); }
         }
 
         /// <summary>

@@ -6,6 +6,22 @@
   },
   "MetadataCacheSeconds": 5,
   "MultipartThresholdBytes": 16777216,
+  "Telemetry": {
+    "Enabled": true,
+    "ServiceName": "s3drive-agent",
+    "OtlpEnabled": false,
+    "OtlpEndpoint": "http://127.0.0.1:4317",
+    "OtlpProtocol": "grpc",
+    "PrometheusEnabled": false,
+    "PrometheusHostname": "127.0.0.1",
+    "PrometheusPort": 9464,
+    "ExportLogs": false,
+    "LokiEnabled": false,
+    "LokiEndpoint": "http://127.0.0.1:3100/otlp",
+    "SamplingRatio": 1.0,
+    "MetricsExportIntervalMs": 15000,
+    "IncludeObjectKeys": false
+  },
   "Drives": [
     {
       "Id": "drv_example_aws",

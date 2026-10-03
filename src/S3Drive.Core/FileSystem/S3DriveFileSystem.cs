@@ -2,6 +2,7 @@ namespace S3Drive.Core.FileSystem
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Security.AccessControl;
     using System.Threading;
@@ -10,6 +11,7 @@ namespace S3Drive.Core.FileSystem
     using S3Drive.Core.Concurrency;
     using S3Drive.Core.Diagnostics;
     using S3Drive.Core.Storage;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// A Dokan filesystem that exposes a single S3 bucket as a drive. One file maps to one
@@ -28,6 +30,7 @@ namespace S3Drive.Core.FileSystem
         private readonly string _StagingDirectory;
         private readonly string _VolumeLabel;
         private readonly CancellationToken _Token;
+        private readonly string _Drive;
 
         /// <summary>
         /// Initializes a new filesystem over a store.
@@ -41,6 +44,23 @@ namespace S3Drive.Core.FileSystem
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="store"/>, <paramref name="cache"/>, or <paramref name="locks"/> is null.</exception>
         /// <exception cref="ArgumentException">Thrown when <paramref name="stagingDirectory"/> or <paramref name="volumeLabel"/> is null or empty.</exception>
         public S3DriveFileSystem(IS3Store store, MetadataCache cache, ObjectLocks locks, string stagingDirectory, string volumeLabel, CancellationToken token)
+            : this(store, cache, locks, stagingDirectory, volumeLabel, token, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new filesystem over a store whose telemetry is labeled with a drive letter.
+        /// </summary>
+        /// <param name="store">The backing object store. Cannot be null.</param>
+        /// <param name="cache">The metadata cache. Cannot be null.</param>
+        /// <param name="locks">The per-object lock set. Cannot be null.</param>
+        /// <param name="stagingDirectory">The directory for staged read/write files. Cannot be null or empty.</param>
+        /// <param name="volumeLabel">The volume label shown for the drive. Cannot be null or empty.</param>
+        /// <param name="token">A cancellation token that aborts in-flight storage operations on unmount.</param>
+        /// <param name="driveLetter">The drive letter reported as the <c>s3drive.drive</c> telemetry label. Null or invalid values report <c>unknown</c>.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="store"/>, <paramref name="cache"/>, or <paramref name="locks"/> is null.</exception>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="stagingDirectory"/> or <paramref name="volumeLabel"/> is null or empty.</exception>
+        public S3DriveFileSystem(IS3Store store, MetadataCache cache, ObjectLocks locks, string stagingDirectory, string volumeLabel, CancellationToken token, string? driveLetter)
         {
             if (store == null) throw new ArgumentNullException(nameof(store));
             if (cache == null) throw new ArgumentNullException(nameof(cache));
@@ -54,12 +74,26 @@ namespace S3Drive.Core.FileSystem
             _StagingDirectory = stagingDirectory;
             _VolumeLabel = volumeLabel;
             _Token = token;
+            _Drive = S3DriveTelemetry.NormalizeDrive(driveLetter);
 
             Directory.CreateDirectory(_StagingDirectory);
         }
 
         /// <inheritdoc />
         public NtStatus CreateFile(string fileName, DokanNet.FileAccess access, FileShare share, FileMode mode, FileOptions options, FileAttributes attributes, IDokanFileInfo info)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsCreateFile, true))
+            {
+                scope.SetTag(TelemetryNames.AttrFileMode, mode.ToString());
+                scope.SetObjectKey(KeyMapper.ToObjectKey(fileName));
+                NtStatus status = CreateFileCore(fileName, access, mode, info, scope);
+                scope.SetTag(TelemetryNames.AttrIsDirectory, info.IsDirectory);
+                if (status == NtStatus.Success && info.Context != null) S3DriveTelemetry.RecordOpenHandle(_Drive, 1);
+                return S3DriveTelemetry.CompleteFs(scope, status);
+            }
+        }
+
+        private NtStatus CreateFileCore(string fileName, DokanNet.FileAccess access, FileMode mode, IDokanFileInfo info, TelemetryScope scope)
         {
             if (IsRoot(fileName))
             {
@@ -83,12 +117,14 @@ namespace S3Drive.Core.FileSystem
 
                 return OpenFile(key, access, mode, info, fileExists);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
@@ -99,36 +135,58 @@ namespace S3Drive.Core.FileSystem
             FileContext? context = info.Context as FileContext;
             if (context == null) return;
 
-            try
+            bool deleting = info.DeletePending || context.DeleteOnCleanup;
+            bool committing = !deleting && !context.IsDirectory && context.Dirty && context.StagingPath != null;
+
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsCleanup, deleting || committing))
             {
-                if (info.DeletePending || context.DeleteOnCleanup)
+                scope.SetObjectKey(context.Key);
+                scope.SetTag(TelemetryNames.AttrIsDirectory, context.IsDirectory);
+                try
                 {
-                    using (_Locks.Acquire(context.Key))
+                    CleanupCore(context, deleting);
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    scope.Fail(ex);
+                    S3DriveLog.Warn("cleanup cancelled for " + KeyMapper.ToPath(context.Key) + "; pending changes were not committed");
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    S3DriveLog.Warn("cleanup failed for " + KeyMapper.ToPath(context.Key) + "; pending changes were not committed: " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+        }
+
+        private void CleanupCore(FileContext context, bool deleting)
+        {
+            if (deleting)
+            {
+                using (_Locks.Acquire(context.Key))
+                {
+                    RunStage(TelemetryNames.StageDelete, () =>
                     {
                         if (context.IsDirectory) RunDeleteDirectoryMarker(context.Key);
                         else RunDelete(context.Key);
-                    }
-
-                    InvalidateForKey(context.Key, context.IsDirectory);
-                    S3DriveLog.Info((context.IsDirectory ? "rmdir " : "delete ") + KeyMapper.ToPath(context.Key));
+                    });
                 }
-                else if (!context.IsDirectory && context.Dirty && context.StagingPath != null)
+
+                InvalidateForKey(context.Key, context.IsDirectory);
+                S3DriveLog.Info((context.IsDirectory ? "rmdir " : "delete ") + KeyMapper.ToPath(context.Key));
+            }
+            else if (!context.IsDirectory && context.Dirty && context.StagingPath != null)
+            {
+                long writtenBytes = File.Exists(context.StagingPath) ? new FileInfo(context.StagingPath).Length : 0;
+                string stagingPath = context.StagingPath;
+                using (_Locks.Acquire(context.Key))
                 {
-                    long writtenBytes = File.Exists(context.StagingPath) ? new FileInfo(context.StagingPath).Length : 0;
-                    using (_Locks.Acquire(context.Key))
-                    {
-                        RunPutFromFile(context.Key, context.StagingPath);
-                    }
-
-                    InvalidateForKey(context.Key, false);
-                    S3DriveLog.Info("write " + KeyMapper.ToPath(context.Key) + " (" + writtenBytes + " bytes)");
+                    RunStage(TelemetryNames.StageUpload, () => RunPutFromFile(context.Key, stagingPath));
                 }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception)
-            {
+
+                InvalidateForKey(context.Key, false);
+                S3DriveLog.Info("write " + KeyMapper.ToPath(context.Key) + " (" + writtenBytes + " bytes)");
             }
         }
 
@@ -136,6 +194,7 @@ namespace S3Drive.Core.FileSystem
         public void CloseFile(string fileName, IDokanFileInfo info)
         {
             FileContext? context = info.Context as FileContext;
+            if (context != null) S3DriveTelemetry.RecordOpenHandle(_Drive, -1);
             if (context != null && context.StagingPath != null)
             {
                 try
@@ -152,6 +211,18 @@ namespace S3Drive.Core.FileSystem
 
         /// <inheritdoc />
         public NtStatus ReadFile(string fileName, byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info)
+        {
+            FileContext? current = info.Context as FileContext;
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsReadFile, current != null && current.StagingPath == null))
+            {
+                if (current != null) scope.SetObjectKey(current.Key);
+                NtStatus status = ReadFileCore(buffer, out bytesRead, offset, info, scope);
+                S3DriveTelemetry.RecordFsBytes(_Drive, "read", bytesRead);
+                return S3DriveTelemetry.CompleteFs(scope, status);
+            }
+        }
+
+        private NtStatus ReadFileCore(byte[] buffer, out int bytesRead, long offset, IDokanFileInfo info, TelemetryScope scope)
         {
             bytesRead = 0;
             FileContext? context = info.Context as FileContext;
@@ -172,18 +243,32 @@ namespace S3Drive.Core.FileSystem
 
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
 
         /// <inheritdoc />
         public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info)
+        {
+            FileContext? current = info.Context as FileContext;
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsWriteFile, current != null && current.StagingPath == null))
+            {
+                if (current != null) scope.SetObjectKey(current.Key);
+                NtStatus status = WriteFileCore(buffer, out bytesWritten, offset, info, scope);
+                S3DriveTelemetry.RecordFsBytes(_Drive, "write", bytesWritten);
+                return S3DriveTelemetry.CompleteFs(scope, status);
+            }
+        }
+
+        private NtStatus WriteFileCore(byte[] buffer, out int bytesWritten, long offset, IDokanFileInfo info, TelemetryScope scope)
         {
             bytesWritten = 0;
             FileContext? context = info.Context as FileContext;
@@ -207,12 +292,14 @@ namespace S3Drive.Core.FileSystem
 
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
@@ -225,6 +312,16 @@ namespace S3Drive.Core.FileSystem
 
         /// <inheritdoc />
         public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, IDokanFileInfo info)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsGetFileInformation, !IsRoot(fileName)))
+            {
+                scope.SetObjectKey(KeyMapper.ToObjectKey(fileName));
+                NtStatus status = GetFileInformationCore(fileName, out fileInfo, info, scope);
+                return S3DriveTelemetry.CompleteFs(scope, status);
+            }
+        }
+
+        private NtStatus GetFileInformationCore(string fileName, out FileInformation fileInfo, IDokanFileInfo info, TelemetryScope scope)
         {
             if (IsRoot(fileName))
             {
@@ -261,13 +358,15 @@ namespace S3Drive.Core.FileSystem
                 fileInfo = FileInfoFor(KeyMapper.GetName(fileName), length, modified);
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 fileInfo = default;
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 fileInfo = default;
                 return NtStatus.Error;
             }
@@ -275,6 +374,17 @@ namespace S3Drive.Core.FileSystem
 
         /// <inheritdoc />
         public NtStatus FindFiles(string fileName, out IList<FileInformation> files, IDokanFileInfo info)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsFindFiles, true))
+            {
+                scope.SetObjectKey(KeyMapper.ToPrefix(fileName));
+                NtStatus status = FindFilesCore(fileName, out files, scope);
+                scope.SetTag(TelemetryNames.AttrCount, files.Count);
+                return S3DriveTelemetry.CompleteFs(scope, status);
+            }
+        }
+
+        private NtStatus FindFilesCore(string fileName, out IList<FileInformation> files, TelemetryScope scope)
         {
             files = new List<FileInformation>();
 
@@ -290,12 +400,14 @@ namespace S3Drive.Core.FileSystem
                 S3DriveLog.Info("enumerate " + KeyMapper.ToPath(prefix) + " (" + entries.Count + " entries)");
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
@@ -325,6 +437,15 @@ namespace S3Drive.Core.FileSystem
         /// <inheritdoc />
         public NtStatus DeleteFile(string fileName, IDokanFileInfo info)
         {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsDeleteFile, true))
+            {
+                scope.SetObjectKey(KeyMapper.ToObjectKey(fileName));
+                return S3DriveTelemetry.CompleteFs(scope, DeleteFileCore(fileName, info, scope));
+            }
+        }
+
+        private NtStatus DeleteFileCore(string fileName, IDokanFileInfo info, TelemetryScope scope)
+        {
             string key = KeyMapper.ToObjectKey(fileName);
             FileContext? context = info.Context as FileContext;
             if (context != null && context.IsDirectory) return NtStatus.AccessDenied;
@@ -337,18 +458,29 @@ namespace S3Drive.Core.FileSystem
                 if (context != null) context.DeleteOnCleanup = true;
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
 
         /// <inheritdoc />
         public NtStatus DeleteDirectory(string fileName, IDokanFileInfo info)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsDeleteDirectory, true))
+            {
+                scope.SetObjectKey(KeyMapper.ToObjectKey(fileName));
+                return S3DriveTelemetry.CompleteFs(scope, DeleteDirectoryCore(fileName, info, scope));
+            }
+        }
+
+        private NtStatus DeleteDirectoryCore(string fileName, IDokanFileInfo info, TelemetryScope scope)
         {
             string key = KeyMapper.ToObjectKey(fileName);
 
@@ -361,18 +493,31 @@ namespace S3Drive.Core.FileSystem
                 if (context != null) context.DeleteOnCleanup = true;
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
 
         /// <inheritdoc />
         public NtStatus MoveFile(string oldName, string newName, bool replace, IDokanFileInfo info)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsMoveFile, true))
+            {
+                scope.SetObjectKey(KeyMapper.ToObjectKey(oldName));
+                if (S3DriveTelemetry.IncludeObjectKeys) scope.SetTag(TelemetryNames.AttrObjectDestination, KeyMapper.ToObjectKey(newName));
+                scope.SetTag("s3drive.fs.replace", replace);
+                return S3DriveTelemetry.CompleteFs(scope, MoveFileCore(oldName, newName, replace, info, scope));
+            }
+        }
+
+        private NtStatus MoveFileCore(string oldName, string newName, bool replace, IDokanFileInfo info, TelemetryScope scope)
         {
             string oldKey = KeyMapper.ToObjectKey(oldName);
             string newKey = KeyMapper.ToObjectKey(newName);
@@ -392,8 +537,8 @@ namespace S3Drive.Core.FileSystem
 
                 using (_Locks.Acquire(oldKey))
                 {
-                    RunCopy(oldKey, newKey);
-                    RunDelete(oldKey);
+                    RunStage(TelemetryNames.StageCopy, () => RunCopy(oldKey, newKey));
+                    RunStage(TelemetryNames.StageDelete, () => RunDelete(oldKey));
                 }
 
                 InvalidateForKey(oldKey, false);
@@ -401,12 +546,14 @@ namespace S3Drive.Core.FileSystem
                 S3DriveLog.Info("move " + KeyMapper.ToPath(oldKey) + " -> " + KeyMapper.ToPath(newKey));
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
@@ -414,13 +561,13 @@ namespace S3Drive.Core.FileSystem
         /// <inheritdoc />
         public NtStatus SetEndOfFile(string fileName, long length, IDokanFileInfo info)
         {
-            return Truncate(info, length);
+            return InstrumentedTruncate(info, length);
         }
 
         /// <inheritdoc />
         public NtStatus SetAllocationSize(string fileName, long length, IDokanFileInfo info)
         {
-            return Truncate(info, length);
+            return InstrumentedTruncate(info, length);
         }
 
         /// <inheritdoc />
@@ -563,7 +710,17 @@ namespace S3Drive.Core.FileSystem
             return NtStatus.Success;
         }
 
-        private NtStatus Truncate(IDokanFileInfo info, long length)
+        private NtStatus InstrumentedTruncate(IDokanFileInfo info, long length)
+        {
+            FileContext? current = info.Context as FileContext;
+            using (TelemetryScope scope = S3DriveTelemetry.StartFs(_Drive, TelemetryNames.FsSetLength, current != null && current.StagingPath == null))
+            {
+                if (current != null) scope.SetObjectKey(current.Key);
+                return S3DriveTelemetry.CompleteFs(scope, Truncate(info, length, scope));
+            }
+        }
+
+        private NtStatus Truncate(IDokanFileInfo info, long length, TelemetryScope scope)
         {
             FileContext? context = info.Context as FileContext;
             if (context == null || context.IsDirectory) return NtStatus.InvalidParameter;
@@ -583,12 +740,14 @@ namespace S3Drive.Core.FileSystem
 
                 return NtStatus.Success;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Unsuccessful;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                scope.RecordException(ex);
                 return NtStatus.Error;
             }
         }
@@ -598,14 +757,20 @@ namespace S3Drive.Core.FileSystem
             string oldPrefix = oldKey + "/";
             string newPrefix = newKey + "/";
 
-            IReadOnlyList<string> keys = _Store.ListAllKeysAsync(oldPrefix, _Token).GetAwaiter().GetResult();
-            foreach (string key in keys)
-            {
-                string destination = newPrefix + key.Substring(oldPrefix.Length);
-                RunCopy(key, destination);
-            }
+            IReadOnlyList<string> keys = Array.Empty<string>();
+            RunStage(TelemetryNames.StageListAll, () => keys = _Store.ListAllKeysAsync(oldPrefix, _Token).GetAwaiter().GetResult());
+            Activity.Current?.SetTag(TelemetryNames.AttrCount, keys.Count);
 
-            RunDeleteMany(keys);
+            RunStage(TelemetryNames.StageCopy, () =>
+            {
+                foreach (string key in keys)
+                {
+                    string destination = newPrefix + key.Substring(oldPrefix.Length);
+                    RunCopy(key, destination);
+                }
+            });
+
+            RunStage(TelemetryNames.StageDelete, () => RunDeleteMany(keys));
 
             _Cache.InvalidatePrefix(oldPrefix);
             _Cache.InvalidatePrefix(newPrefix);
@@ -618,7 +783,7 @@ namespace S3Drive.Core.FileSystem
             string path = NewStagingPath();
             using (_Locks.Acquire(context.Key))
             {
-                RunGetToFile(context.Key, path);
+                RunStage(TelemetryNames.StageDownload, () => RunGetToFile(context.Key, path));
             }
 
             context.StagingPath = path;
@@ -699,7 +864,7 @@ namespace S3Drive.Core.FileSystem
 
         private void RunPutDirectoryMarker(string key)
         {
-            _Store.PutAsync(key + "/", Array.Empty<byte>(), _Token).GetAwaiter().GetResult();
+            RunStage(TelemetryNames.StageMkdir, () => _Store.PutAsync(key + "/", Array.Empty<byte>(), _Token).GetAwaiter().GetResult());
             S3DriveLog.Info("mkdir " + KeyMapper.ToPath(key));
         }
 
@@ -723,6 +888,23 @@ namespace S3Drive.Core.FileSystem
         private void RunCopy(string sourceKey, string destinationKey)
         {
             _Store.CopyAsync(sourceKey, destinationKey, _Token).GetAwaiter().GetResult();
+        }
+
+        private void RunStage(string stage, Action action)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartFsStage(_Drive, stage))
+            {
+                try
+                {
+                    action();
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
         }
 
         private static bool IsRoot(string fileName)

@@ -13,6 +13,7 @@ namespace S3Drive.Core.Storage
     using Blobject.Core;
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Diagnostics;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// An <see cref="IS3Store"/> backed by Blobject's Amazon S3 client. Supports both real AWS
@@ -29,6 +30,7 @@ namespace S3Drive.Core.Storage
         private readonly AmazonS3BlobClient _Client;
         private readonly IAmazonS3 _S3Client;
         private readonly string _Bucket;
+        private readonly string _Drive;
         private bool _Disposed;
 
         /// <summary>
@@ -48,6 +50,7 @@ namespace S3Drive.Core.Storage
             _Client = new AmazonS3BlobClient(BuildSettings(profile, secretKey));
             _S3Client = BuildS3Client(profile, secretKey);
             _Bucket = profile.Bucket;
+            _Drive = S3DriveTelemetry.NormalizeDrive(profile.DriveLetter);
         }
 
         /// <inheritdoc />
@@ -71,8 +74,15 @@ namespace S3Drive.Core.Storage
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                // The filesystem treats a failed HEAD as "absent". A genuine not-found is expected;
+                // anything else (auth, network, endpoint errors) is recorded so it is not invisible.
+                if (!S3DriveTelemetry.IsNotFound(exception))
+                {
+                    S3DriveTelemetry.RecordSuppressedS3Error(_Drive, TelemetryNames.S3HeadObject, exception);
+                }
+
                 return null;
             }
         }
@@ -252,8 +262,9 @@ namespace S3Drive.Core.Storage
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
+                S3DriveTelemetry.RecordSuppressedS3Error(_Drive, TelemetryNames.S3ValidateConnectivity, exception);
                 return false;
             }
         }
@@ -292,6 +303,7 @@ namespace S3Drive.Core.Storage
                 // errors, individually and existence-guarded, so a merely-absent key is a no-op and
                 // a genuine failure gets a second attempt.
                 List<DeleteError> errors = exception.Response.DeleteErrors;
+                S3DriveTelemetry.RecordBatchDeleteFallback(_Drive, "partial");
                 foreach (DeleteError error in errors)
                 {
                     token.ThrowIfCancellationRequested();
@@ -303,6 +315,7 @@ namespace S3Drive.Core.Storage
                 // The endpoint does not implement multi-object delete at all; fall back to deleting
                 // each key individually so the operation still completes. Deleting a key that no
                 // longer exists is not an error, so each delete is existence-guarded.
+                S3DriveTelemetry.RecordBatchDeleteFallback(_Drive, "unsupported");
                 S3DriveLog.Warn("multi-object delete unavailable (" + batch.Count + " keys), deleting individually: " + exception.Message);
                 foreach (string key in batch)
                 {

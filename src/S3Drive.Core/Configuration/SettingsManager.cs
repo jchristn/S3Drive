@@ -7,6 +7,7 @@ namespace S3Drive.Core.Configuration
     using System.Threading;
     using System.Threading.Tasks;
     using S3Drive.Core.Serialization;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// Loads and saves <see cref="S3DriveSettings"/> from the configuration file. Writes are
@@ -39,6 +40,25 @@ namespace S3Drive.Core.Configuration
         /// <returns>The loaded settings. Never null.</returns>
         public async Task<S3DriveSettings> LoadAsync(CancellationToken token = default)
         {
+            using (TelemetryScope scope = S3DriveTelemetry.StartIpc(TelemetryNames.IpcConfigLoad))
+            {
+                try
+                {
+                    S3DriveSettings settings = await LoadCoreAsync(token).ConfigureAwait(false);
+                    scope.SetTag(TelemetryNames.AttrCount, settings.Drives.Count);
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                    return settings;
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
+        }
+
+        private async Task<S3DriveSettings> LoadCoreAsync(CancellationToken token)
+        {
             token.ThrowIfCancellationRequested();
             _Paths.EnsureDirectories();
 
@@ -68,21 +88,33 @@ namespace S3Drive.Core.Configuration
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
 
-            token.ThrowIfCancellationRequested();
-            _Paths.EnsureDirectories();
-
-            string json = JsonSerializer.Serialize(settings, S3DriveJson.Options);
-            string finalPath = _Paths.ConfigFile;
-            string tempPath = finalPath + ".tmp";
-
-            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            using (TelemetryScope scope = S3DriveTelemetry.StartIpc(TelemetryNames.IpcConfigSave))
             {
-                await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
-                await writer.FlushAsync(token).ConfigureAwait(false);
-            }
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    _Paths.EnsureDirectories();
 
-            File.Move(tempPath, finalPath, true);
+                    string json = JsonSerializer.Serialize(settings, S3DriveJson.Options);
+                    string finalPath = _Paths.ConfigFile;
+                    string tempPath = finalPath + ".tmp";
+
+                    using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                    {
+                        await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
+                        await writer.FlushAsync(token).ConfigureAwait(false);
+                    }
+
+                    File.Move(tempPath, finalPath, true);
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
         }
 
         /// <summary>
@@ -111,6 +143,38 @@ namespace S3Drive.Core.Configuration
             if (TryGetBool("S3DRIVE_LOG_FILE", out bool fileLogging)) settings.Logging.FileLogging = fileLogging;
             if (TryGetInt("S3DRIVE_METADATA_CACHE_SECONDS", out int cacheSeconds)) settings.MetadataCacheSeconds = cacheSeconds;
             if (TryGetLong("S3DRIVE_MULTIPART_THRESHOLD_BYTES", out long threshold)) settings.MultipartThresholdBytes = threshold;
+
+            TelemetrySettings telemetry = settings.Telemetry;
+            if (TryGetBool("S3DRIVE_TELEMETRY_ENABLED", out bool telemetryEnabled)) telemetry.Enabled = telemetryEnabled;
+            if (TryGetString("S3DRIVE_TELEMETRY_SERVICE_NAME", out string serviceName)) telemetry.ServiceName = serviceName;
+            if (TryGetBool("S3DRIVE_OTLP_ENABLED", out bool otlpEnabled)) telemetry.OtlpEnabled = otlpEnabled;
+            if (TryGetString("S3DRIVE_OTLP_ENDPOINT", out string otlpEndpoint)) telemetry.OtlpEndpoint = otlpEndpoint;
+            if (TryGetString("S3DRIVE_OTLP_PROTOCOL", out string otlpProtocol)) telemetry.OtlpProtocol = otlpProtocol;
+            if (TryGetBool("S3DRIVE_PROMETHEUS_ENABLED", out bool prometheusEnabled)) telemetry.PrometheusEnabled = prometheusEnabled;
+            if (TryGetString("S3DRIVE_PROMETHEUS_HOSTNAME", out string prometheusHostname)) telemetry.PrometheusHostname = prometheusHostname;
+            if (TryGetInt("S3DRIVE_PROMETHEUS_PORT", out int prometheusPort)) telemetry.PrometheusPort = prometheusPort;
+            if (TryGetBool("S3DRIVE_TELEMETRY_EXPORT_LOGS", out bool exportLogs)) telemetry.ExportLogs = exportLogs;
+            if (TryGetBool("S3DRIVE_LOKI_ENABLED", out bool lokiEnabled)) telemetry.LokiEnabled = lokiEnabled;
+            if (TryGetString("S3DRIVE_LOKI_ENDPOINT", out string lokiEndpoint)) telemetry.LokiEndpoint = lokiEndpoint;
+            if (TryGetDouble("S3DRIVE_TELEMETRY_SAMPLING_RATIO", out double samplingRatio)) telemetry.SamplingRatio = samplingRatio;
+            if (TryGetBool("S3DRIVE_TELEMETRY_INCLUDE_OBJECT_KEYS", out bool includeKeys)) telemetry.IncludeObjectKeys = includeKeys;
+        }
+
+        private bool TryGetString(string name, out string value)
+        {
+            value = string.Empty;
+            string? raw = _EnvironmentReader(name);
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+            value = raw.Trim();
+            return true;
+        }
+
+        private bool TryGetDouble(string name, out double value)
+        {
+            value = 0;
+            string? raw = _EnvironmentReader(name);
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+            return double.TryParse(raw.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
         }
 
         private bool TryGetBool(string name, out bool value)

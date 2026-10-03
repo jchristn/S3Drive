@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The agent pushes OTLP to the collector; the collector exposes the metrics here.
+  - job_name: 's3drive-otel-collector'
+    honor_labels: true
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Optional: scrape the agent's in-process endpoint (telemetry.prometheusEnabled = true)
+  # instead of, or as well as, the collector. Disabled by default so an unrelated service on
+  # the host's port 9464 is never scraped as S3Drive. See TELEMETRY.md ("Scraping the agent
+  # directly") for the Windows hostname / URL-reservation requirement.
+  # - job_name: 's3drive-agent'
+  #   static_configs:
+  #     - targets: ['host.docker.internal:9464']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['127.0.0.1:9090']

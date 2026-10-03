@@ -9,6 +9,7 @@ namespace S3Drive.Core.Ipc
     using System.Threading.Tasks;
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Serialization;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// A file-based command channel: the TUI drops a command file into the agent's command
@@ -28,21 +29,37 @@ namespace S3Drive.Core.Ipc
             if (paths == null) throw new ArgumentNullException(nameof(paths));
             if (command == null) throw new ArgumentNullException(nameof(command));
 
-            paths.EnsureDirectories();
-
-            string json = JsonSerializer.Serialize(command, S3DriveJson.Options);
-            string finalName = "cmd-" + Guid.NewGuid().ToString("N") + ".json";
-            string finalPath = Path.Combine(paths.CommandDirectory, finalName);
-            string tempPath = finalPath + ".tmp";
-
-            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            using (TelemetryScope scope = S3DriveTelemetry.StartIpc(TelemetryNames.IpcCommandSend))
             {
-                await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
-                await writer.FlushAsync(token).ConfigureAwait(false);
-            }
+                try
+                {
+                    scope.SetTag(TelemetryNames.AttrCommandType, command.CommandType.ToString());
+                    if (command.CreatedUtc == null) command.CreatedUtc = DateTime.UtcNow;
+                    if (string.IsNullOrEmpty(command.TraceParent)) command.TraceParent = S3DriveTelemetry.CurrentTraceParent();
 
-            File.Move(tempPath, finalPath, true);
+                    paths.EnsureDirectories();
+
+                    string json = JsonSerializer.Serialize(command, S3DriveJson.Options);
+                    string finalName = "cmd-" + Guid.NewGuid().ToString("N") + ".json";
+                    string finalPath = Path.Combine(paths.CommandDirectory, finalName);
+                    string tempPath = finalPath + ".tmp";
+
+                    using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)))
+                    {
+                        await writer.WriteAsync(json.AsMemory(), token).ConfigureAwait(false);
+                        await writer.FlushAsync(token).ConfigureAwait(false);
+                    }
+
+                    File.Move(tempPath, finalPath, true);
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
         }
 
         /// <summary>

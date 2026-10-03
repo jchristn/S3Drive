@@ -53,3 +53,30 @@ releases.
   (cancellation) mapping to NTSTATUS codes, and a filesystem end-to-end case against the live
   endpoint. Integration cases now use a unique key prefix per case and clean up after
   themselves.
+- Observability (see `TELEMETRY.md`). `S3Drive.Core` emits metrics and traces through the .NET
+  base class library on the `S3Drive` meter and activity source (no telemetry SDK dependency):
+  per-operation counters and latency histograms with bounded outcome and `error.type` labels for
+  every Dokan filesystem operation; per-stage histograms and spans for download, upload, copy,
+  delete, list_all, and mkdir; an `S3 <Operation>` client span plus request, latency, byte, and
+  error-code metrics for every outbound S3 call (`InstrumentedS3Store`); metadata cache
+  hit/miss/entries/invalidations; per-object lock wait, held, and contention; mount and unmount
+  operations with stages and per-drive state gauges; the agent command pipeline as a traced job
+  (queued, parse, and execute stages, job outcomes, last-success and heartbeat gauges);
+  status/config I/O; log-line and crash counters; and build-info and configuration gauges. HEAD
+  failures that were previously reported to Windows as "file not found" are now counted as
+  `s3drive.s3.suppressed_errors`, and a failed upload on close is now logged and counted instead of
+  silently dropped.
+- W3C trace context crosses the TUI-to-agent command channel: `AgentCommand` carries the sender's
+  `TraceParent` and `CreatedUtc`, and the agent's command span joins the sender's trace.
+- `S3Drive.Agent` hosts a single [Radiant](https://www.nuget.org/packages/Radiant) 0.1.2 telemetry
+  host configured from a new `Telemetry` settings section (OTLP, in-process Prometheus endpoint,
+  log export to the collector or Loki, sampling ratio, opt-in object keys on spans), each key with
+  an `S3DRIVE_*` environment override. All exporters are off by default; the defaults use
+  `127.0.0.1`. Also subscribes to the `System.Net.Http` meter and .NET runtime metrics.
+- `docker/compose.yaml` observability stack (OpenTelemetry Collector, Prometheus, Tempo, Loki,
+  Grafana; pinned images, healthchecks, `127.0.0.1`-bound overridable ports) with
+  `docker/update.{bat,sh}`, and five provisioned Grafana dashboards in `assets/grafana/` (Overview,
+  Filesystem, S3 & Integrations, Cache & Locks, Agent).
+- Telemetry test suite (in-memory `MeterListener`/`ActivityListener`) covering every instrumented
+  area, failure and cancellation paths, trace nesting and propagation, label cardinality, and the
+  no-listener path, plus a live-endpoint classification case.

@@ -5,6 +5,7 @@ namespace S3Drive.Core.Diagnostics
     using System.IO;
     using System.Text;
     using System.Threading;
+    using S3Drive.Core.Telemetry;
     using SyslogLogging;
 
     /// <summary>
@@ -123,6 +124,7 @@ namespace S3Drive.Core.Diagnostics
         {
             if (exception == null) return;
 
+            S3DriveTelemetry.RecordCrash(exception);
             string? path = null;
             try
             {
@@ -204,6 +206,7 @@ namespace S3Drive.Core.Diagnostics
         private static void SafeLog(Severity severity, string message)
         {
             string text = message ?? string.Empty;
+            S3DriveTelemetry.RecordLog(severity.ToString());
 
             LoggingModule? log = _Log;
             if (log != null)

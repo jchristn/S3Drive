@@ -9,10 +9,12 @@ namespace S3Drive.Core.Mounting
     using DokanNet.Logging;
     using S3Drive.Core.Concurrency;
     using S3Drive.Core.Configuration;
+    using S3Drive.Core.Diagnostics;
     using S3Drive.Core.FileSystem;
     using S3Drive.Core.Ipc;
     using S3Drive.Core.Security;
     using S3Drive.Core.Storage;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// Owns the set of active mounts. Each mount exposes one bucket as one drive letter; multiple
@@ -37,6 +39,7 @@ namespace S3Drive.Core.Mounting
         {
             _Paths = paths ?? throw new ArgumentNullException(nameof(paths));
             _Protector = protector ?? throw new ArgumentNullException(nameof(protector));
+            S3DriveTelemetry.RegisterMountManager(this);
         }
 
         /// <summary>
@@ -76,25 +79,60 @@ namespace S3Drive.Core.Mounting
         public async Task MountAsync(DriveProfile profile, CancellationToken token)
         {
             if (profile == null) throw new ArgumentNullException(nameof(profile));
+
+            using (TelemetryScope scope = S3DriveTelemetry.StartMount(TelemetryNames.MountOperationMount, S3DriveTelemetry.NormalizeDrive(profile.DriveLetter), profile.Id))
+            {
+                try
+                {
+                    bool mounted = await MountCoreAsync(profile, token).ConfigureAwait(false);
+                    scope.Complete(mounted ? TelemetryNames.OutcomeSuccess : TelemetryNames.OutcomeSkipped);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
+            }
+        }
+
+        private async Task<bool> MountCoreAsync(DriveProfile profile, CancellationToken token)
+        {
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Mounting requires Windows and the Dokan driver.");
 
             lock (_Sync)
             {
-                if (_Mounts.ContainsKey(profile.Id)) return;
+                if (_Mounts.ContainsKey(profile.Id)) return false;
             }
 
-            string secret = await _Protector.UnprotectAsync(profile.SecretKeyEncrypted, token).ConfigureAwait(false);
+            string secret;
+            using (TelemetryScope stage = S3DriveTelemetry.StartMountStage(TelemetryNames.StageDecryptCredentials))
+            {
+                try
+                {
+                    secret = await _Protector.UnprotectAsync(profile.SecretKeyEncrypted, token).ConfigureAwait(false);
+                    stage.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    stage.Fail(ex);
+                    throw;
+                }
+            }
 
             string stagingDirectory = _Paths.CacheDirectoryFor(profile.Id);
-            ResetDirectory(stagingDirectory);
+            RunMountStage(TelemetryNames.StagePrepareStaging, () => ResetDirectory(stagingDirectory));
 
-            BlobS3Store store = new BlobS3Store(profile, secret);
-            MetadataCache cache = new MetadataCache(_MetadataCacheSeconds);
-            ObjectLocks locks = new ObjectLocks();
+            BlobS3Store? built = null;
+            RunMountStage(TelemetryNames.StageBuildStore, () => built = new BlobS3Store(profile, secret));
+            BlobS3Store store = built!;
+
+            MetadataCache cache = new MetadataCache(_MetadataCacheSeconds, profile.DriveLetter);
+            ObjectLocks locks = new ObjectLocks(profile.DriveLetter);
             CancellationTokenSource cts = new CancellationTokenSource();
+            InstrumentedS3Store instrumented = new InstrumentedS3Store(store, profile.DriveLetter, profile.Provider, profile.Bucket);
 
             string label = string.IsNullOrEmpty(profile.Name) ? "S3Drive" : profile.Name;
-            S3DriveFileSystem fileSystem = new S3DriveFileSystem(store, cache, locks, stagingDirectory, label, cts.Token);
+            S3DriveFileSystem fileSystem = new S3DriveFileSystem(instrumented, cache, locks, stagingDirectory, label, cts.Token, profile.DriveLetter);
 
             MountEntry entry = new MountEntry(profile, store, cts, stagingDirectory);
 
@@ -109,7 +147,20 @@ namespace S3Drive.Core.Mounting
                         options.Options = DokanOptions.MountManager | DokanOptions.EnableNetworkUnmount;
                     });
 
-                DokanInstance instance = builder.Build(fileSystem);
+                DokanInstance instance;
+                using (TelemetryScope stage = S3DriveTelemetry.StartMountStage(TelemetryNames.StageDokanMount))
+                {
+                    try
+                    {
+                        instance = builder.Build(fileSystem);
+                        stage.Complete(TelemetryNames.OutcomeSuccess);
+                    }
+                    catch (Exception stageException)
+                    {
+                        stage.Fail(stageException);
+                        throw;
+                    }
+                }
 
                 entry.Dokan = dokan;
                 entry.Instance = instance;
@@ -133,6 +184,7 @@ namespace S3Drive.Core.Mounting
             }
 
             RaiseStatus();
+            return true;
         }
 
         /// <summary>
@@ -152,6 +204,17 @@ namespace S3Drive.Core.Mounting
                 _Mounts.Remove(driveId);
             }
 
+            using (TelemetryScope scope = S3DriveTelemetry.StartMount(TelemetryNames.MountOperationUnmount, S3DriveTelemetry.NormalizeDrive(entry.Profile.DriveLetter), driveId))
+            {
+                UnmountEntry(entry, scope);
+            }
+
+            RaiseStatus();
+            return Task.CompletedTask;
+        }
+
+        private void UnmountEntry(MountEntry entry, TelemetryScope scope)
+        {
             entry.Status.MountState = DriveMountStateEnum.Unmounting;
             RaiseStatus();
 
@@ -160,12 +223,29 @@ namespace S3Drive.Core.Mounting
                 entry.Cts.Cancel();
                 if (OperatingSystem.IsWindows())
                 {
-                    entry.Instance?.Dispose();
-                    entry.Dokan?.Dispose();
+                    using (TelemetryScope stage = S3DriveTelemetry.StartMountStage(TelemetryNames.StageDokanUnmount))
+                    {
+                        try
+                        {
+                            entry.Instance?.Dispose();
+                            entry.Dokan?.Dispose();
+                            stage.Complete(TelemetryNames.OutcomeSuccess);
+                        }
+                        catch (Exception stageException)
+                        {
+                            stage.Fail(stageException);
+                            throw;
+                        }
+                    }
                 }
+
+                scope.Complete(TelemetryNames.OutcomeSuccess);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Teardown continues regardless; the failure is recorded so it is not invisible.
+                scope.Fail(ex);
+                S3DriveLog.Warn("unmount of " + entry.Profile.Name + " did not complete cleanly: " + ex.GetType().Name + ": " + ex.Message);
             }
             finally
             {
@@ -173,9 +253,6 @@ namespace S3Drive.Core.Mounting
                 entry.Cts.Dispose();
                 SafeDeleteDirectory(entry.StagingDirectory);
             }
-
-            RaiseStatus();
-            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -234,6 +311,23 @@ namespace S3Drive.Core.Mounting
             }
             catch (Exception)
             {
+            }
+        }
+
+        private static void RunMountStage(string stage, Action action)
+        {
+            using (TelemetryScope scope = S3DriveTelemetry.StartMountStage(stage))
+            {
+                try
+                {
+                    action();
+                    scope.Complete(TelemetryNames.OutcomeSuccess);
+                }
+                catch (Exception ex)
+                {
+                    scope.Fail(ex);
+                    throw;
+                }
             }
         }
 

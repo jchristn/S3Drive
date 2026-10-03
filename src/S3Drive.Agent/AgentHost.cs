@@ -10,6 +10,7 @@ namespace S3Drive.Agent
     using S3Drive.Core.Ipc;
     using S3Drive.Core.Mounting;
     using S3Drive.Core.Security;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// The background host that owns the mount manager, processes commands from the TUI, and
@@ -120,13 +121,13 @@ namespace S3Drive.Agent
             try
             {
                 _Settings = await _SettingsManager.LoadAsync(token).ConfigureAwait(false);
-                _Mounts.MetadataCacheSeconds = _Settings.MetadataCacheSeconds;
+                ApplySettings();
                 await AutoMountAsync(token).ConfigureAwait(false);
                 await PublishStatusAsync(token).ConfigureAwait(false);
 
                 while (!token.IsCancellationRequested)
                 {
-                    await DrainCommandsAsync(token).ConfigureAwait(false);
+                    await CommandDispatcher.DrainAsync(_Paths, ExecuteAsync, token).ConfigureAwait(false);
                     try
                     {
                         await Task.Delay(500, token).ConfigureAwait(false);
@@ -162,38 +163,13 @@ namespace S3Drive.Agent
             }
         }
 
-        private async Task DrainCommandsAsync(CancellationToken token)
-        {
-            foreach (string file in CommandChannel.ListPending(_Paths))
-            {
-                if (!CommandChannel.TryRead(file, out AgentCommand? command) || command == null)
-                {
-                    TryDelete(file);
-                    continue;
-                }
-
-                try
-                {
-                    await ExecuteAsync(command, token).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    S3DriveLog.Error("Command " + command.CommandType + " failed: " + ex.Message);
-                }
-                finally
-                {
-                    TryDelete(file);
-                }
-            }
-        }
-
         private async Task ExecuteAsync(AgentCommand command, CancellationToken token)
         {
             switch (command.CommandType)
             {
                 case AgentCommandTypeEnum.Reload:
                     _Settings = await _SettingsManager.LoadAsync(token).ConfigureAwait(false);
-                    _Mounts.MetadataCacheSeconds = _Settings.MetadataCacheSeconds;
+                    ApplySettings();
                     await AutoMountAsync(token).ConfigureAwait(false);
                     break;
                 case AgentCommandTypeEnum.Mount:
@@ -218,6 +194,19 @@ namespace S3Drive.Agent
             }
 
             await PublishStatusAsync(token).ConfigureAwait(false);
+        }
+
+        private void ApplySettings()
+        {
+            _Mounts.MetadataCacheSeconds = _Settings.MetadataCacheSeconds;
+
+            int autoMount = 0;
+            foreach (DriveProfile profile in _Settings.Drives)
+            {
+                if (profile.AutoMount) autoMount++;
+            }
+
+            S3DriveTelemetry.SetConfigSnapshot(_Settings.MetadataCacheSeconds, _Settings.Drives.Count, autoMount);
         }
 
         private AgentStatus BuildFullStatus()
@@ -299,17 +288,6 @@ namespace S3Drive.Agent
         private CancellationToken Token()
         {
             return _Cts?.Token ?? CancellationToken.None;
-        }
-
-        private static void TryDelete(string file)
-        {
-            try
-            {
-                File.Delete(file);
-            }
-            catch (Exception)
-            {
-            }
         }
     }
 }

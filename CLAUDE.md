@@ -54,6 +54,16 @@ dashboard, telemetry, i18n, SDKs) do **not** apply to this desktop app.
 - Secrets never logged or returned in plaintext; masked in the UI; encrypted at rest.
 - Use `127.0.0.1`, not `localhost`.
 
+## Telemetry
+
+- Every new code path that does I/O or can fail gets a metric and a span (see `TELEMETRY.md`).
+  Emit only through `S3DriveTelemetry` / `TelemetryScope` in `S3Drive.Core` (BCL `Meter` and
+  `ActivitySource`, no SDK); export is configured once, in `S3Drive.Agent/AgentTelemetry.cs`.
+- All names live in `TelemetryNames`; every instrument must be declared in `S3DriveMetricCatalog`
+  (a test fails otherwise). Metric labels must be bounded — no ids, keys, paths, or free text.
+- Instrumentation is best-effort and must never change a result or throw into the caller.
+- Update `TELEMETRY.md` and the dashboards in `assets/grafana/` when metrics change.
+
 ## Build and run
 
 - `go.bat` — builds the solution and launches the TUI (which starts the agent if needed).

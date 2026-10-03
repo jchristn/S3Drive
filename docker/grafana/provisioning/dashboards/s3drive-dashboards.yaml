@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'S3Drive'
+    orgId: 1
+    folder: 'S3Drive'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards/s3drive

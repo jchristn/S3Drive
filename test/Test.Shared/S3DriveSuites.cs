@@ -44,6 +44,7 @@ namespace Test.Shared
                 FileSystemSuite.Build(),
                 MountManagerSuite.Build(),
                 BlobS3StoreSuite.Build(),
+                TelemetrySuite.Build(storage),
                 StorageIntegrationSuite.Build(storage)
             };
         }

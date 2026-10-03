@@ -49,6 +49,10 @@ the tray does.
   over the network from Windows Explorer — S3Drive does not manage sharing itself.
 - **Menu-driven TUI** for configuration and live monitoring, plus a **system tray agent** with
   About and mount/unmount controls.
+- **Built-in observability.** Metrics, traces, and (opt-in) logs for every filesystem operation,
+  S3 request, cache, lock, mount, and TUI command, exportable over OTLP to Prometheus, Tempo, and
+  Loki, with a ready-made Docker stack and five Grafana dashboards. See
+  [Observability](#observability).
 
 ## Platform support
 
@@ -95,6 +99,28 @@ Configuration lives in `%USERPROFILE%\.s3drive\s3drive.json`. A documented examp
 Secret keys are **encrypted at rest** and are never written in plaintext or logged; the TUI
 masks them.
 
+The optional `Telemetry` section controls metric, trace, and log export (all exporters are off by
+default); every key also has an `S3DRIVE_*` environment override. See
+[`TELEMETRY.md`](TELEMETRY.md#configuration).
+
+## Observability
+
+The agent emits OpenTelemetry-shaped metrics and traces on the `S3Drive` meter and activity source
+for everything it does: each Dokan filesystem operation and its stages (download, upload, copy,
+delete), every outbound S3 request (with S3 error codes), the metadata cache, per-object locks,
+mounts, the TUI command pipeline, and status/config I/O, plus .NET runtime and HTTP client metrics.
+A slow or failing Explorer operation resolves, in Grafana, to the stage and the S3 call responsible.
+
+```bash
+docker compose -f docker/compose.yaml up -d     # collector, Prometheus, Tempo, Loki, Grafana
+```
+
+Then set `"Telemetry": { "OtlpEnabled": true, "ExportLogs": true }` in `s3drive.json` (or
+`S3DRIVE_OTLP_ENABLED=true`), restart the agent, and open Grafana at `http://localhost:3000`
+(`admin` / `admin`, local development only) → folder **S3Drive**. Dashboards: Overview,
+Filesystem, S3 & Integrations, Cache & Locks, and Agent. [`TELEMETRY.md`](TELEMETRY.md) lists every
+metric, span, configuration key, and recommended alert.
+
 ## Sharing on the network
 
 A mounted S3Drive drive is an ordinary Windows volume, so you share it exactly as you would any
@@ -120,8 +146,10 @@ S3Drive.sln
 Directory.Build.props        shared build settings (net8.0, version 0.1.0, conventions)
 go.bat                       build the solution and launch the TUI
 assets/                      logo.png, logo.ico
+  grafana/                   Grafana dashboards (provisioned by docker/compose.yaml)
+docker/                      observability stack: compose.yaml, collector, Prometheus, Tempo, Loki, Grafana provisioning
 src/
-  S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, locks
+  S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, locks, telemetry emit
   S3Drive.Agent/             Avalonia tray agent (owns mounts)
   S3Drive.Tui/               TUIKit configuration and monitoring console
 test/
@@ -149,8 +177,8 @@ dotnet test test/Test.Nunit
 ```
 
 The deterministic suites (key mapping, metadata cache, configuration, settings, cryptography,
-locks, IPC, logging, the Dokan filesystem over an in-memory store, mount manager, and offline
-`BlobS3Store` checks) run on any OS. The storage integration suite runs against a live S3 or
+locks, IPC, logging, the Dokan filesystem over an in-memory store, mount manager, offline
+`BlobS3Store` checks, and telemetry emission) run on any OS. The storage integration suite runs against a live S3 or
 S3-compatible endpoint and is skipped unless one is configured, either with Test.Automated
 arguments (`--endpoint`, `--access-key`, `--secret-key`, `--bucket`, `--region`, `--provider`,
 `--ssl`, `--path-style`) or `S3DRIVE_TEST_*` environment variables (the only option for the xUnit
@@ -168,6 +196,8 @@ bucket through the Dokany driver and drives real file operations against it, and
   concurrent access and locking, and the boundaries of its guarantees.
 - [`S3_OPERATIONS.md`](S3_OPERATIONS.md) — how each filesystem operation maps to S3 requests
   (enumeration, traversal, reads, writes, updates, rename) and where the limitations are.
+- [`TELEMETRY.md`](TELEMETRY.md) — metrics and spans catalog, configuration, the observability
+  stack, dashboards, and recommended alerts.
 
 ## Third-party components
 
@@ -187,6 +217,8 @@ from <https://github.com/dokan-dev/dokany>.
 | [PrettyId](https://github.com/jchristn/prettyid) | Identifier generation | MIT |
 | [TUIKit](https://www.nuget.org/packages/tuikit) | Terminal user interface | MIT |
 | [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`, `.Desktop`, `.Themes.Fluent`) | Tray icon and About window | MIT |
+| [Radiant](https://www.nuget.org/packages/Radiant) (agent only) | Telemetry host (OTLP, Prometheus, Loki export) | MIT |
+| [OpenTelemetry .NET](https://github.com/open-telemetry/opentelemetry-dotnet) (via Radiant) | Metrics, traces, and logs SDK and exporters | Apache-2.0 |
 | [Touchstone](https://github.com/jchristn/touchstone) (tests only) | Runner-agnostic test descriptors | MIT |
 | [xUnit](https://github.com/xunit/xunit), [NUnit](https://github.com/nunit/nunit) (tests only) | Test runners | Apache-2.0 / MIT |
 | [.NET 8](https://github.com/dotnet/runtime) / `System.Text.Json` | Runtime and serialization | MIT |

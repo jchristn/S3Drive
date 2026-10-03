@@ -3,6 +3,7 @@ namespace S3Drive.Core.Storage
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using S3Drive.Core.Telemetry;
 
     /// <summary>
     /// A thread-safe, time-limited in-memory cache of directory listings and object attributes.
@@ -14,16 +15,30 @@ namespace S3Drive.Core.Storage
         private readonly object _Sync = new object();
         private readonly Dictionary<string, ListingEntry> _Listings = new Dictionary<string, ListingEntry>(StringComparer.Ordinal);
         private readonly Dictionary<string, HeadEntry> _Heads = new Dictionary<string, HeadEntry>(StringComparer.Ordinal);
+        private const string KindHead = "head";
+        private const string KindListing = "listing";
+
         private readonly long _TtlTicks;
+        private readonly string _Drive;
 
         /// <summary>
         /// Initializes a new instance.
         /// </summary>
         /// <param name="ttlSeconds">The time-to-live in seconds. Zero disables caching. Negative values are treated as zero.</param>
-        public MetadataCache(int ttlSeconds)
+        public MetadataCache(int ttlSeconds) : this(ttlSeconds, null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance whose telemetry is labeled with a drive letter.
+        /// </summary>
+        /// <param name="ttlSeconds">The time-to-live in seconds. Zero disables caching. Negative values are treated as zero.</param>
+        /// <param name="driveLetter">The drive letter reported as the <c>s3drive.drive</c> telemetry label. Null or invalid values report <c>unknown</c>.</param>
+        public MetadataCache(int ttlSeconds, string? driveLetter)
         {
             long seconds = ttlSeconds < 0 ? 0 : ttlSeconds;
             _TtlTicks = seconds * Stopwatch.Frequency;
+            _Drive = S3DriveTelemetry.NormalizeDrive(driveLetter);
         }
 
         /// <summary>
@@ -44,17 +59,23 @@ namespace S3Drive.Core.Storage
         {
             entries = null;
             if (prefix == null) throw new ArgumentNullException(nameof(prefix));
-            if (!Enabled) return false;
+            if (!Enabled)
+            {
+                S3DriveTelemetry.RecordCacheLookup(_Drive, KindListing, "bypass");
+                return false;
+            }
 
             lock (_Sync)
             {
                 if (_Listings.TryGetValue(prefix, out ListingEntry entry) && !IsExpired(entry.Timestamp))
                 {
                     entries = entry.Entries;
+                    S3DriveTelemetry.RecordCacheLookup(_Drive, KindListing, "hit");
                     return true;
                 }
             }
 
+            S3DriveTelemetry.RecordCacheLookup(_Drive, KindListing, "miss");
             return false;
         }
 
@@ -69,10 +90,14 @@ namespace S3Drive.Core.Storage
             if (entries == null) throw new ArgumentNullException(nameof(entries));
             if (!Enabled) return;
 
+            int delta;
             lock (_Sync)
             {
+                delta = _Listings.ContainsKey(prefix) ? 0 : 1;
                 _Listings[prefix] = new ListingEntry(entries, Now());
             }
+
+            S3DriveTelemetry.RecordCacheEntries(_Drive, KindListing, delta);
         }
 
         /// <summary>
@@ -85,17 +110,23 @@ namespace S3Drive.Core.Storage
         {
             entry = null;
             if (key == null) throw new ArgumentNullException(nameof(key));
-            if (!Enabled) return false;
+            if (!Enabled)
+            {
+                S3DriveTelemetry.RecordCacheLookup(_Drive, KindHead, "bypass");
+                return false;
+            }
 
             lock (_Sync)
             {
                 if (_Heads.TryGetValue(key, out HeadEntry head) && !IsExpired(head.Timestamp))
                 {
                     entry = head.Entry;
+                    S3DriveTelemetry.RecordCacheLookup(_Drive, KindHead, "hit");
                     return true;
                 }
             }
 
+            S3DriveTelemetry.RecordCacheLookup(_Drive, KindHead, "miss");
             return false;
         }
 
@@ -109,10 +140,14 @@ namespace S3Drive.Core.Storage
             if (key == null) throw new ArgumentNullException(nameof(key));
             if (!Enabled) return;
 
+            int delta;
             lock (_Sync)
             {
+                delta = _Heads.ContainsKey(key) ? 0 : 1;
                 _Heads[key] = new HeadEntry(entry, Now());
             }
+
+            S3DriveTelemetry.RecordCacheEntries(_Drive, KindHead, delta);
         }
 
         /// <summary>
@@ -123,11 +158,15 @@ namespace S3Drive.Core.Storage
         {
             if (key == null) throw new ArgumentNullException(nameof(key));
 
+            int headsRemoved = 0;
+            int listingsRemoved = 0;
             lock (_Sync)
             {
-                _Heads.Remove(key);
-                _Listings.Remove(ParentPrefix(key));
+                if (_Heads.Remove(key)) headsRemoved++;
+                if (_Listings.Remove(ParentPrefix(key))) listingsRemoved++;
             }
+
+            RecordRemoval(headsRemoved, listingsRemoved, "key");
         }
 
         /// <summary>
@@ -138,25 +177,35 @@ namespace S3Drive.Core.Storage
         {
             if (prefix == null) throw new ArgumentNullException(nameof(prefix));
 
+            int headsRemoved = 0;
+            int listingsRemoved = 0;
             lock (_Sync)
             {
-                _Listings.Remove(prefix);
-                _Listings.Remove(ParentPrefix(prefix.TrimEnd('/')));
+                if (_Listings.Remove(prefix)) listingsRemoved++;
+                if (_Listings.Remove(ParentPrefix(prefix.TrimEnd('/')))) listingsRemoved++;
 
                 List<string> staleHeads = new List<string>();
                 foreach (KeyValuePair<string, HeadEntry> pair in _Heads)
                 {
                     if (pair.Key.StartsWith(prefix, StringComparison.Ordinal)) staleHeads.Add(pair.Key);
                 }
-                foreach (string stale in staleHeads) _Heads.Remove(stale);
+                foreach (string stale in staleHeads)
+                {
+                    if (_Heads.Remove(stale)) headsRemoved++;
+                }
 
                 List<string> staleListings = new List<string>();
                 foreach (KeyValuePair<string, ListingEntry> pair in _Listings)
                 {
                     if (pair.Key.StartsWith(prefix, StringComparison.Ordinal)) staleListings.Add(pair.Key);
                 }
-                foreach (string stale in staleListings) _Listings.Remove(stale);
+                foreach (string stale in staleListings)
+                {
+                    if (_Listings.Remove(stale)) listingsRemoved++;
+                }
             }
+
+            RecordRemoval(headsRemoved, listingsRemoved, "prefix");
         }
 
         /// <summary>
@@ -164,11 +213,24 @@ namespace S3Drive.Core.Storage
         /// </summary>
         public void Clear()
         {
+            int headsRemoved;
+            int listingsRemoved;
             lock (_Sync)
             {
+                headsRemoved = _Heads.Count;
+                listingsRemoved = _Listings.Count;
                 _Listings.Clear();
                 _Heads.Clear();
             }
+
+            RecordRemoval(headsRemoved, listingsRemoved, "clear");
+        }
+
+        private void RecordRemoval(int headsRemoved, int listingsRemoved, string scope)
+        {
+            S3DriveTelemetry.RecordCacheInvalidation(_Drive, scope);
+            S3DriveTelemetry.RecordCacheEntries(_Drive, KindHead, -headsRemoved);
+            S3DriveTelemetry.RecordCacheEntries(_Drive, KindListing, -listingsRemoved);
         }
 
         private static long Now()
