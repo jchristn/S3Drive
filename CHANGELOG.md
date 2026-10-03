@@ -4,6 +4,22 @@ All notable changes to S3Drive are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-03 (Alpha)
+
+### Changed
+- Dependency updates: AWSSDK.S3 4.0.102.1 -> 4.0.104.1, Blobject.AmazonS3 5.0.21 -> 6.1.0,
+  Padlock 1.0.4 -> 1.2.0, SyslogLogging 2.2.2 -> 2.3.1, Avalonia / Avalonia.Desktop /
+  Avalonia.Themes.Fluent 11.3.20 -> 12.1.3, TUIKit 1.1.1 -> 1.2.0.
+- Test dependency updates: Touchstone (Core, Cli, XunitAdapter, NunitAdapter) 0.1.12 -> 0.2.0,
+  Microsoft.NET.Test.Sdk 17.14.1 -> 18.10.1, coverlet.collector 6.0.4 -> 10.1.0,
+  xunit.runner.visualstudio 3.1.4 -> 4.0.0, NUnit 4.3.2 -> 5.0.0, NUnit.Analyzers 4.7.0 -> 4.15.0,
+  NUnit3TestAdapter 5.0.0 -> 6.3.0. No source changes were required.
+
+### Added
+- Regression tests for the upgraded dependencies: `BlobS3Store` surfaces a failure (not an
+  empty result) when the endpoint refuses connections, and `ObjectLocks` leaves a key
+  acquirable after a canceled wait and honors a pre-canceled token.
+
 ## [0.1.0] - Unreleased (Alpha)
 
 Initial alpha. Configuration formats, behavior, and interfaces may change between `0.1.x`

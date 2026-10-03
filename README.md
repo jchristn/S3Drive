@@ -4,7 +4,7 @@
 
 # S3Drive
 
-**v0.1.0 Alpha** &nbsp;·&nbsp; © 2026 Joel Christner
+**v0.1.1 Alpha** &nbsp;·&nbsp; © 2026 Joel Christner
 
 Your S3 bucket as a local Windows drive.
 
@@ -143,7 +143,7 @@ consistency and coherency, even at the cost of concurrent access to the same fil
 
 ```
 S3Drive.sln
-Directory.Build.props        shared build settings (net8.0, version 0.1.0, conventions)
+Directory.Build.props        shared build settings (net8.0, version 0.1.1, conventions)
 go.bat                       build the solution and launch the TUI
 assets/                      logo.png, logo.ico
   grafana/                   Grafana dashboards (provisioned by docker/compose.yaml)

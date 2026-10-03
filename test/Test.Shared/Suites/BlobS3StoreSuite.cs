@@ -117,6 +117,35 @@ namespace Test.Shared.Suites
                     }
                 }),
 
+                TestCases.Create(SuiteId, "UnreachableOperationsFail", "BlobS3Store surfaces a failure, not an empty result, when the endpoint refuses connections", async ct =>
+                {
+                    using (BlobS3Store store = new BlobS3Store(CompatibleProfile(true), "secret"))
+                    {
+                        bool putFailed = false;
+                        bool listFailed = false;
+                        try
+                        {
+                            await store.PutAsync("k", new byte[] { 1, 2, 3 }, ct).ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            putFailed = true;
+                        }
+
+                        try
+                        {
+                            await store.ListAsync(string.Empty, ct).ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            listFailed = true;
+                        }
+
+                        Assert.True(putFailed, "put against an unreachable endpoint should fail");
+                        Assert.True(listFailed, "list against an unreachable endpoint should fail");
+                    }
+                }),
+
                 TestCases.Create(SuiteId, "PutFromMissingFileThrows", "BlobS3Store.PutFromFileAsync surfaces a missing source file", async ct =>
                 {
                     using (BlobS3Store store = new BlobS3Store(CompatibleProfile(true), "secret"))

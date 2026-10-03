@@ -124,6 +124,43 @@ namespace Test.Shared.Suites
                     Assert.True(blocked, "second acquisition should block while held");
                 }),
 
+                TestCases.Create(SuiteId, "ObjectLocksCanceledWaitLeavesKeyUsable", "ObjectLocks leave a key acquirable after a canceled wait and honor a pre-canceled token", async ct =>
+                {
+                    ObjectLocks locks = new ObjectLocks();
+                    IDisposable held = locks.Acquire("k");
+                    using (CancellationTokenSource cts = new CancellationTokenSource(100))
+                    {
+                        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                        {
+                            using (await locks.AcquireAsync("k", cts.Token).ConfigureAwait(false))
+                            {
+                            }
+                        }).ConfigureAwait(false);
+                    }
+
+                    held.Dispose();
+                    Assert.False(locks.IsLocked("k"), "a canceled waiter must not leave the key held");
+
+                    using (CancellationTokenSource canceled = new CancellationTokenSource())
+                    {
+                        canceled.Cancel();
+                        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+                        {
+                            using (await locks.AcquireAsync("free", canceled.Token).ConfigureAwait(false))
+                            {
+                            }
+                        }).ConfigureAwait(false);
+                    }
+
+                    using (CancellationTokenSource cts = new CancellationTokenSource(5000))
+                    {
+                        using (await locks.AcquireAsync("k", cts.Token).ConfigureAwait(false))
+                        {
+                            Assert.True(locks.IsLocked("k"), "key acquirable after the canceled wait");
+                        }
+                    }
+                }),
+
                 TestCases.Create(SuiteId, "ObjectLocksWaiterProceedsAfterRelease", "ObjectLocks let a waiter proceed once the holder releases", async ct =>
                 {
                     ObjectLocks locks = new ObjectLocks();
