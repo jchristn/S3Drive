@@ -1,23 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Test.Automated - console harness for deterministic S3Drive.Core logic (key/path mapping,
-    config round-trip, metadata-cache invalidation, lock serialization). Test cases are added
-    with the Core foundation phase.
+    Test.Automated - console runner for the shared Touchstone suites in Test.Shared. Also hosts the
+    interactive harness modes (mount-test, make-config, send-command) used to drive a
+    real Dokan mount and a running agent by hand.
   -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\S3Drive.Core\S3Drive.Core.csproj" />
+    <ProjectReference Include="..\Test.Shared\Test.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="DokanNet" Version="2.3.0.3" />
+    <PackageReference Include="Touchstone.Cli" Version="0.1.12" />
   </ItemGroup>
 
 </Project>

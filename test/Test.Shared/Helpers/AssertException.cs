@@ -1,4 +1,4 @@
-namespace Test.Automated.Harness
+namespace Test.Shared.Helpers
 {
     using System;
 

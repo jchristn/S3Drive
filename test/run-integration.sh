@@ -10,7 +10,7 @@
 # To test against a different endpoint instead (real AWS S3, MinIO, Ceph, or an
 # already-running server), skip this script and pass the endpoint on the command line:
 #
-#   dotnet run --project test/Test.Automated -- \
+#   dotnet run --project test/Test.Automated -f net8.0 -- \
 #     --endpoint http://127.0.0.1:9000 --access-key KEY --secret-key SECRET \
 #     --bucket my-bucket --provider s3compatible --path-style true --ssl false
 #
@@ -37,6 +37,6 @@ for _ in $(seq 1 90); do
 done
 
 echo "Running tests..."
-dotnet run --project "$ROOT/test/Test.Automated/Test.Automated.csproj" -c Debug -- \
+dotnet run --project "$ROOT/test/Test.Automated/Test.Automated.csproj" -f net8.0 -c Debug -- \
   --endpoint "$ENDPOINT" --access-key default --secret-key default \
   --bucket default --provider s3compatible --path-style true --ssl false

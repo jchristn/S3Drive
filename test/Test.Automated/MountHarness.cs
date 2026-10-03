@@ -10,7 +10,7 @@ namespace Test.Automated
     using S3Drive.Core.Concurrency;
     using S3Drive.Core.FileSystem;
     using S3Drive.Core.Storage;
-    using Test.Automated.Harness;
+    using Test.Shared.Helpers;
 
     /// <summary>
     /// A real end-to-end mount test: mounts a bucket to a drive letter via the installed Dokan

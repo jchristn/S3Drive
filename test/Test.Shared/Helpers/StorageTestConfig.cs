@@ -1,4 +1,4 @@
-namespace Test.Automated
+namespace Test.Shared.Helpers
 {
     using System;
     using System.Collections.Generic;
@@ -26,6 +26,16 @@ namespace Test.Automated
         public bool Enabled { get; private set; }
 
         /// <summary>
+        /// Builds a configuration from the S3DRIVE_TEST_* environment variables only. Used by the
+        /// xUnit and NUnit runners, which cannot accept command-line arguments.
+        /// </summary>
+        /// <returns>The configuration; <see cref="Enabled"/> is false when insufficient values are supplied.</returns>
+        public static StorageTestConfig FromEnvironment()
+        {
+            return FromArgs(Array.Empty<string>());
+        }
+
+        /// <summary>
         /// Builds a configuration from CLI arguments (for example --endpoint, --access-key,
         /// --secret-key, --bucket, --region, --provider, --ssl, --path-style) or the matching
         /// S3DRIVE_TEST_* environment variables.
@@ -34,6 +44,8 @@ namespace Test.Automated
         /// <returns>The configuration; <see cref="Enabled"/> is false when insufficient values are supplied.</returns>
         public static StorageTestConfig FromArgs(string[] args)
         {
+            if (args == null) throw new ArgumentNullException(nameof(args));
+
             Dictionary<string, string> map = ParseArgs(args);
 
             string? endpoint = Lookup(map, "endpoint", "S3DRIVE_TEST_ENDPOINT");

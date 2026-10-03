@@ -10,7 +10,7 @@ REM
 REM  To test against a different endpoint (real AWS S3, MinIO, Ceph, or an
 REM  already-running server), skip this script and pass the endpoint directly:
 REM
-REM    dotnet run --project test\Test.Automated -- ^
+REM    dotnet run --project test\Test.Automated -f net8.0 -- ^
 REM      --endpoint http://127.0.0.1:9000 --access-key KEY --secret-key SECRET ^
 REM      --bucket my-bucket --provider s3compatible --path-style true --ssl false
 REM ============================================================================
@@ -33,7 +33,7 @@ for /l %%i in (1,1,90) do (
 :ready
 
 echo Running tests...
-dotnet run --project "test\Test.Automated\Test.Automated.csproj" -c Debug -- --endpoint %ENDPOINT% --access-key default --secret-key default --bucket default --provider s3compatible --path-style true --ssl false
+dotnet run --project "test\Test.Automated\Test.Automated.csproj" -f net8.0 -c Debug -- --endpoint %ENDPOINT% --access-key default --secret-key default --bucket default --provider s3compatible --path-style true --ssl false
 set EXITCODE=%ERRORLEVEL%
 
 echo Tearing down...

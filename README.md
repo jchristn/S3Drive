@@ -125,8 +125,41 @@ src/
   S3Drive.Agent/             Avalonia tray agent (owns mounts)
   S3Drive.Tui/               TUIKit configuration and monitoring console
 test/
-  Test.Automated/            deterministic Core tests
+  Test.Shared/               every test, as Touchstone descriptors (single source of truth)
+  Test.Automated/            console runner, plus interactive mount/agent harness modes
+  Test.Xunit/                xUnit runner over Test.Shared
+  Test.Nunit/                NUnit runner over Test.Shared
+  run-integration.{sh,bat}   full suite against an ephemeral Less3 container
 ```
+
+## Testing
+
+All tests live once, in `test/Test.Shared`, as [Touchstone](https://github.com/jchristn/touchstone)
+descriptors (`S3DriveSuites.All`). Three runners execute the same descriptors, so a test added to
+`Test.Shared` runs everywhere. Test projects target `net8.0` and `net10.0`, so building the solution
+requires the .NET 10 SDK.
+
+```bash
+# Console runner (colored table; --results writes JSON)
+dotnet run --project test/Test.Automated -f net8.0 -- --results results.json
+
+# xUnit and NUnit
+dotnet test test/Test.Xunit
+dotnet test test/Test.Nunit
+```
+
+The deterministic suites (key mapping, metadata cache, configuration, settings, cryptography,
+locks, IPC, logging, the Dokan filesystem over an in-memory store, mount manager, and offline
+`BlobS3Store` checks) run on any OS. The storage integration suite runs against a live S3 or
+S3-compatible endpoint and is skipped unless one is configured, either with Test.Automated
+arguments (`--endpoint`, `--access-key`, `--secret-key`, `--bucket`, `--region`, `--provider`,
+`--ssl`, `--path-style`) or `S3DRIVE_TEST_*` environment variables (the only option for the xUnit
+and NUnit runners). `test/run-integration.sh` (or `.bat`) runs the whole suite against an
+ephemeral Less3 container in Docker.
+
+Test.Automated also keeps the Windows-only interactive harness modes: `--mount-test` mounts a
+bucket through the Dokany driver and drives real file operations against it, and
+`--make-config` / `--send-command` set up and drive a running agent end-to-end.
 
 ## Documentation
 
@@ -154,6 +187,8 @@ from <https://github.com/dokan-dev/dokany>.
 | [PrettyId](https://github.com/jchristn/prettyid) | Identifier generation | MIT |
 | [TUIKit](https://www.nuget.org/packages/tuikit) | Terminal user interface | MIT |
 | [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`, `.Desktop`, `.Themes.Fluent`) | Tray icon and About window | MIT |
+| [Touchstone](https://github.com/jchristn/touchstone) (tests only) | Runner-agnostic test descriptors | MIT |
+| [xUnit](https://github.com/xunit/xunit), [NUnit](https://github.com/nunit/nunit) (tests only) | Test runners | Apache-2.0 / MIT |
 | [.NET 8](https://github.com/dotnet/runtime) / `System.Text.Json` | Runtime and serialization | MIT |
 
 ## License

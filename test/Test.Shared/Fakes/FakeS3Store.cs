@@ -1,4 +1,4 @@
-namespace Test.Automated.Fakes
+namespace Test.Shared.Fakes
 {
     using System;
     using System.Collections.Generic;
@@ -16,12 +16,46 @@ namespace Test.Automated.Fakes
     {
         private readonly object _Sync = new object();
         private readonly Dictionary<string, byte[]> _Objects = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        private readonly HashSet<string> _HeadedKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<string, DateTime> _Modified = new Dictionary<string, DateTime>(StringComparer.Ordinal);
 
         /// <summary>
         /// Whether connectivity validation reports success.
         /// </summary>
         public bool ConnectivityResult { get; set; } = true;
+
+        /// <summary>
+        /// When set, every store operation throws this exception (simulates an unreachable or
+        /// failing endpoint).
+        /// </summary>
+        public Exception? FailWith { get; set; }
+
+        /// <summary>
+        /// The number of successful single-object writes (<see cref="PutAsync"/> and
+        /// <see cref="PutFromFileAsync"/>), for assertions.
+        /// </summary>
+        public int PutCallCount { get; private set; }
+
+        /// <summary>
+        /// The number of successful HEAD requests, for assertions about metadata caching.
+        /// </summary>
+        public int HeadCallCount { get; private set; }
+
+        /// <summary>
+        /// Determines whether a HEAD request has been issued for a key (for assertions about
+        /// metadata caching).
+        /// </summary>
+        /// <param name="key">The key.</param>
+        /// <returns>True when the key has been HEADed at least once.</returns>
+        public bool WasHeaded(string key)
+        {
+            lock (_Sync) { return _HeadedKeys.Contains(key); }
+        }
+
+        /// <summary>
+        /// The number of successful listing requests, for assertions about metadata caching.
+        /// </summary>
+        public int ListCallCount { get; private set; }
 
         /// <summary>
         /// The number of objects currently stored.
@@ -71,14 +105,18 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task<bool> ExistsAsync(string key, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync) { return Task.FromResult(_Objects.ContainsKey(key)); }
         }
 
         /// <inheritdoc />
         public Task<S3Entry?> HeadAsync(string key, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync)
             {
+                HeadCallCount++;
+                _HeadedKeys.Add(key);
                 if (!_Objects.TryGetValue(key, out byte[]? data)) return Task.FromResult<S3Entry?>(null);
 
                 S3Entry entry = new S3Entry
@@ -96,11 +134,13 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task<IReadOnlyList<S3Entry>> ListAsync(string prefix, CancellationToken token)
         {
+            Guard(token);
             Dictionary<string, S3Entry> folders = new Dictionary<string, S3Entry>(StringComparer.Ordinal);
             List<S3Entry> files = new List<S3Entry>();
 
             lock (_Sync)
             {
+                ListCallCount++;
                 foreach (KeyValuePair<string, byte[]> pair in _Objects)
                 {
                     string key = pair.Key;
@@ -148,6 +188,7 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task<IReadOnlyList<string>> ListAllKeysAsync(string prefix, CancellationToken token)
         {
+            Guard(token);
             List<string> keys = new List<string>();
             lock (_Sync)
             {
@@ -163,6 +204,7 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task<byte[]> GetAsync(string key, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync)
             {
                 if (!_Objects.TryGetValue(key, out byte[]? data)) throw new FileNotFoundException("No such object: " + key);
@@ -182,10 +224,12 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task PutAsync(string key, byte[] data, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync)
             {
                 _Objects[key] = (byte[])data.Clone();
                 _Modified[key] = DateTime.UtcNow;
+                PutCallCount++;
             }
 
             return Task.CompletedTask;
@@ -201,6 +245,7 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task DeleteAsync(string key, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync)
             {
                 _Objects.Remove(key);
@@ -218,6 +263,7 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task DeleteManyAsync(IReadOnlyCollection<string> keys, CancellationToken token)
         {
+            Guard(token);
             if (keys == null) throw new ArgumentNullException(nameof(keys));
 
             lock (_Sync)
@@ -237,13 +283,12 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task CopyAsync(string sourceKey, string destinationKey, CancellationToken token)
         {
+            Guard(token);
             lock (_Sync)
             {
-                if (_Objects.TryGetValue(sourceKey, out byte[]? data))
-                {
-                    _Objects[destinationKey] = (byte[])data.Clone();
-                    _Modified[destinationKey] = DateTime.UtcNow;
-                }
+                if (!_Objects.TryGetValue(sourceKey, out byte[]? data)) throw new FileNotFoundException("No such object: " + sourceKey);
+                _Objects[destinationKey] = (byte[])data.Clone();
+                _Modified[destinationKey] = DateTime.UtcNow;
             }
 
             return Task.CompletedTask;
@@ -252,7 +297,15 @@ namespace Test.Automated.Fakes
         /// <inheritdoc />
         public Task<bool> ValidateConnectivityAsync(CancellationToken token)
         {
+            Guard(token);
             return Task.FromResult(ConnectivityResult);
+        }
+
+        private void Guard(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            Exception? failure = FailWith;
+            if (failure != null) throw failure;
         }
 
         private static string NameOf(string key)

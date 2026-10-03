@@ -43,3 +43,13 @@ releases.
   agent end-to-end test (auto-mount from config, then unmount via the command channel). These
   require Windows and the Dokany driver. Verified end-to-end against Less3: the agent
   auto-mounted a bucket to a drive letter, round-tripped files through Windows, and unmounted.
+- Test infrastructure migrated to [Touchstone](https://github.com/jchristn/touchstone): every
+  test now lives once in `Test.Shared` as a Touchstone descriptor and runs through
+  `Test.Automated` (console, JSON results via `--results`), `Test.Xunit`, and `Test.Nunit`. The
+  interactive `--mount-test`, `--make-config`, and `--send-command` harness modes are unchanged.
+  Coverage grew from 70 to 225 cases, positive and negative, adding the mount manager, logging,
+  offline `BlobS3Store` validation, every file-open disposition, offset and append writes,
+  metadata-cache coherency after writes, deletes, and renames, store-failure and unmount
+  (cancellation) mapping to NTSTATUS codes, and a filesystem end-to-end case against the live
+  endpoint. Integration cases now use a unique key prefix per case and clean up after
+  themselves.

@@ -2,8 +2,9 @@ namespace Test.Automated
 {
     using System;
     using System.Threading.Tasks;
-    using Test.Automated.Harness;
-    using Test.Automated.Tests;
+    using Test.Shared;
+    using Test.Shared.Helpers;
+    using Touchstone.Cli;
 
     internal static class Program
     {
@@ -11,6 +12,7 @@ namespace Test.Automated
         {
             StorageTestConfig storage = StorageTestConfig.FromArgs(args);
 
+            // Interactive harness modes for driving a real Dokan mount and a running agent by hand.
             if (HasFlag(args, "--mount-test"))
             {
                 return await MountHarness.RunAsync(storage, GetArg(args, "--drive-letter"));
@@ -27,18 +29,7 @@ namespace Test.Automated
                 return await AgentControl.SendCommandAsync(GetArg(args, "--send-command") ?? "reload", GetArg(args, "--drive-id"));
             }
 
-            TestRunner runner = new TestRunner();
-            KeyMapperTests.Register(runner);
-            MetadataCacheTests.Register(runner);
-            ConfigModelTests.Register(runner);
-            SettingsManagerTests.Register(runner);
-            CryptoTests.Register(runner);
-            SecurityAndLockTests.Register(runner);
-            IpcTests.Register(runner);
-            FileSystemTests.Register(runner);
-            StorageIntegrationTests.Register(runner, storage);
-
-            return await runner.RunAsync();
+            return await ConsoleRunner.RunAsync(S3DriveSuites.Build(storage), resultsPath: GetArg(args, "--results"));
         }
 
         private static bool HasFlag(string[] args, string flag)

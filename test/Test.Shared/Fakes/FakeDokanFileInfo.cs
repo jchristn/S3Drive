@@ -1,4 +1,4 @@
-namespace Test.Automated.Fakes
+namespace Test.Shared.Fakes
 {
     using System;
     using System.Security.Principal;

@@ -6,6 +6,7 @@ namespace Test.Automated
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Ipc;
     using S3Drive.Core.Security;
+    using Test.Shared.Helpers;
 
     /// <summary>
     /// Helpers used by the end-to-end agent test: writing a config with an auto-mount drive and

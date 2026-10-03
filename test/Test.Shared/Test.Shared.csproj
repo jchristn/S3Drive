@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Test.Shared - the single source of truth for every S3Drive test. All test logic lives here as
+    Touchstone descriptors (S3DriveSuites.All) and is executed by the Test.Automated (console),
+    Test.Xunit, and Test.Nunit runners. References only Touchstone.Core and S3Drive.Core, and
+    never writes to the console.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework></TargetFramework>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\S3Drive.Core\S3Drive.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Touchstone.Core" Version="0.1.12" />
+  </ItemGroup>
+
+</Project>
