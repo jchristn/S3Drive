@@ -1,0 +1,67 @@
+# Builds the Windows installers (Inno Setup .exe and portable .zip) for every runtime on a clean
+# windows-latest runner and uploads them as workflow artifacts. Called by release.yml (which
+# publishes them) and release-check.yml (which only builds). Every tool is installed here; a
+# packager that "the runner already has" is a bug.
+name: Build Windows installers
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.rid }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    env:
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 and 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Run tests
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: dotnet run --project test/Test.Automated -c Release -f net8.0
+
+      - name: Build S3Drive.Publisher
+        shell: pwsh
+        run: dotnet build src/S3Drive.Publisher/S3Drive.Publisher.csproj -c Release
+
+      - name: Publish (self-contained, single-file)
+        shell: pwsh
+        run: dotnet run --project src/S3Drive.Publisher -c Release --no-build -- --channel publish --rid ${{ matrix.rid }}
+
+      - name: Portable .zip
+        shell: pwsh
+        run: dotnet run --project src/S3Drive.Publisher -c Release --no-build -- --channel zip --rid ${{ matrix.rid }}
+
+      - name: Inno Setup installer
+        shell: pwsh
+        run: dotnet run --project src/S3Drive.Publisher -c Release --no-build -- --channel inno --rid ${{ matrix.rid }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.rid }}
+          path: installers/*/*
+          if-no-files-found: error
+          retention-days: 14

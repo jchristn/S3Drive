@@ -1,0 +1,8 @@
+# Shell scripts must keep LF line endings: a Windows checkout would otherwise convert them to
+# CRLF and they would fail with "bad interpreter".
+*.sh text eol=lf
+
+# Binary assets.
+*.png binary
+*.ico binary
+*.pptx binary

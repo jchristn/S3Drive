@@ -1,0 +1,64 @@
+{
+  "project": {
+    "name": "S3Drive",
+    "packageName": "s3drive",
+    "identifier": "ai.latticetech.s3drive",
+    "tagline": "Your S3 bucket as a local Windows drive.",
+    "description": "S3Drive mounts an Amazon S3 or S3-compatible bucket (Less3, Ceph, MinIO, and others) as a Windows drive letter. A system tray agent owns the mounts and keeps them up whether or not the terminal app is open.",
+    "license": "MIT",
+    "licenseFile": "LICENSE.md",
+    "logo": "assets/logo.png",
+    "publisher": "Lattice AI, LLC",
+    "publisherUrl": "https://latticetech.ai",
+    "repositoryUrl": "https://github.com/jchristn/S3Drive",
+    "copyright": "(c) 2026 Lattice AI, LLC"
+  },
+  "version": {
+    "file": "Directory.Build.props"
+  },
+  "build": {
+    "framework": "net8.0",
+    "configuration": "Release",
+    "runtimes": [ "win-x64", "win-arm64" ],
+    "excludeFromStage": [ "*.pdb", "*.xml" ]
+  },
+  "artifacts": [
+    {
+      "name": "S3Drive",
+      "project": "src/S3Drive.Tui/S3Drive.Tui.csproj",
+      "kind": "Tui",
+      "executable": "S3Drive.Tui.exe",
+      "command": "s3drive",
+      "shortcut": "S3Drive",
+      "summary": "the terminal app for configuring and monitoring your drives"
+    },
+    {
+      "name": "S3Drive Agent",
+      "project": "src/S3Drive.Agent/S3Drive.Agent.csproj",
+      "kind": "TrayAgent",
+      "executable": "S3Drive.Agent.exe",
+      "shortcut": "S3Drive Agent",
+      "startup": "S3Drive Agent",
+      "summary": "the system tray agent that mounts your buckets and keeps them mounted"
+    }
+  ],
+  "channels": [ "publish", "zip", "inno", "checksums" ],
+  "windows": {
+    "prerequisites": [
+      {
+        "name": "Dokany",
+        "detectFile": "{sys}\\dokan2.dll",
+        "url": "https://github.com/dokan-dev/dokany/releases",
+        "message": "S3Drive mounts drives through the Dokany 2 file system driver, a separate free install from github.com/dokan-dev/dokany/releases."
+      }
+    ],
+    "legacyStartupValues": [ "S3DriveAgent" ],
+    "wizardBackground": "#FFFFFF"
+  },
+  "signing": {
+    "windows": {
+      "isConfigured": false,
+      "command": ""
+    }
+  }
+}

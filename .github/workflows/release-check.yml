@@ -1,0 +1,37 @@
+# Builds every Windows installer, with publishing off, whenever a change could break packaging.
+# Packaging breaks from changes nobody thinks of as release changes; finding out on the push beats
+# finding out on release day.
+name: Release check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/S3Drive.Publisher/**'
+      - 'src/**/*.csproj'
+      - 'publisher.json'
+      - 'Directory.Build.props'
+      - 'assets/**'
+      - 'LICENSE.md'
+      - 'build-installers.*'
+      - '.github/workflows/**'
+      - '.github/release-install-notes.md'
+  pull_request:
+    paths:
+      - 'src/S3Drive.Publisher/**'
+      - 'src/**/*.csproj'
+      - 'publisher.json'
+      - 'Directory.Build.props'
+      - 'assets/**'
+      - 'LICENSE.md'
+      - 'build-installers.*'
+      - '.github/workflows/**'
+      - '.github/release-install-notes.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-windows.yml

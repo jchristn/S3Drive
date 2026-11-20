@@ -1,0 +1,116 @@
+# Release pipeline. Pushing a tag v<version> builds every Windows installer, then (fan-in) one job
+# checks the tag against Directory.Build.props and CHANGELOG.md, writes SHA256SUMS over every
+# asset, and publishes the GitHub release in a single step. If any build fails, nothing is
+# published. Running this workflow by hand on a branch is a dry run: it builds everything and
+# skips the release job. See INSTALL.md and C:\code\Agents\requirements\INSTALLERS.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-windows.yml
+
+  release:
+    name: Publish the GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Check the tag, version, and changelog
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props | head -n 1 | tr -d '[:space:]')"
+          if [ -z "$version" ]; then
+            echo "::error::No <Version> in Directory.Build.props"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match v$version from Directory.Build.props"
+            exit 1
+          fi
+          awk -v heading="## [$version]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > changes.md
+          if ! grep -q '[^[:space:]]' changes.md; then
+            echo "::error::CHANGELOG.md has no non-empty '## [$version]' section"
+            exit 1
+          fi
+          # 0.x.y releases are alpha (VERSIONING.md), and suffixed versions are pre-releases.
+          case "$version" in
+            0.*|*-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check every asset is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          missing=0
+          for f in "s3drive-$v-win-x64-setup.exe" "s3drive-$v-win-arm64-setup.exe" "s3drive-$v-win-x64.zip" "s3drive-$v-win-arm64.zip"; do
+            if [ ! -f "dist/$f" ]; then
+              echo "::error::Missing $f"
+              missing=1
+            fi
+          done
+          ls -la dist
+          exit $missing
+
+      - name: Write SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.version.outputs.version }}"
+          {
+            sed "s/{version}/$v/g" .github/release-install-notes.md
+            echo
+            echo "## What's changed"
+            echo
+            cat changes.md
+          } > notes.md
+          cat notes.md
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: S3Drive ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          body_path: notes.md
+          files: dist/*
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          draft: false
+          fail_on_unmatched_files: true

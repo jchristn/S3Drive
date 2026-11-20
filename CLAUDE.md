@@ -68,4 +68,17 @@ dashboard, telemetry, i18n, SDKs) do **not** apply to this desktop app.
 
 - `go.bat` — builds the solution and launches the TUI (which starts the agent if needed).
 - Build must be warnings-clean (`TreatWarningsAsErrors=true`).
-- Shared build settings live in the root `Directory.Build.props` (net8.0, version 0.1.0).
+- Shared build settings live in the root `Directory.Build.props` (net8.0); its `<Version>` is the
+  one version source. Agents never change it without explicit approval (`VERSIONING.md`).
+
+## Installers and releases
+
+- Follows `C:\code\Agents\requirements\INSTALLERS.md`, Windows only (win-x64, win-arm64).
+- `publisher.json` is the single source of truth; `src/S3Drive.Publisher` runs one channel at a
+  time (`publish`, `zip`, `inno`, `checksums`). `build-installers.{bat,sh}` and
+  `.github/workflows/build-windows.yml` both call it, so local and CI builds cannot drift.
+- A `v<version>` tag push runs `release.yml` (fan-out build, fan-in publish). See `INSTALL.md`.
+- The unsigned-build notice is repeated word for word in `.github/release-install-notes.md`,
+  `INSTALL.md`, and the README download section; change all three together.
+- The Inno `AppId` is derived from `ai.latticetech.s3drive`; never change the identifier.
+- The Publisher is build tooling, not product code: it emits no telemetry.

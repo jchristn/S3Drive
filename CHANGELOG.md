@@ -4,7 +4,11 @@ All notable changes to S3Drive are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-10-03 (Alpha)
+## [Unreleased]
+
+## [0.1.1] - 2026-11-20 (Alpha)
+
+First release with installers.
 
 ### Changed
 - Dependency updates: AWSSDK.S3 4.0.102.1 -> 4.0.104.1, Blobject.AmazonS3 5.0.21 -> 6.1.0,
@@ -16,6 +20,26 @@ All notable changes to S3Drive are documented here. The format follows
   NUnit3TestAdapter 5.0.0 -> 6.3.0. No source changes were required.
 
 ### Added
+- Windows installers, published on GitHub Releases for x64 and ARM64: an Inno Setup `.exe` per
+  architecture and a portable `.zip`, all self-contained (no .NET runtime needed), with a
+  `SHA256SUMS` file. Setup shows the S3Drive logo, tagline, and MIT license (which must be
+  accepted), installs to Program Files, adds the `s3drive` command to the system PATH, adds Start
+  menu shortcuts, registers the S3Drive Agent to start at sign-in (`S3Drive Agent` Run entry, and
+  removes the older `S3DriveAgent` entry the startup scripts created), stops running copies before
+  upgrading or uninstalling, and offers the Dokany download page when the driver is missing.
+  Uninstalling removes the PATH and sign-in entries and keeps `%USERPROFILE%\.s3drive`.
+- `S3Drive.Publisher`: the release packager. It reads `publisher.json` and builds one channel at a
+  time (`publish`, `zip`, `inno`, `checksums`), generating the installer icon and wizard images
+  from `assets/logo.png`. `build-installers.bat` and `build-installers.sh` run it locally; output
+  goes to the git-ignored `installers/<version>/`. Code signing is wired but off, by policy.
+- Release automation: pushing a `v<version>` tag builds both architectures on `windows-latest`,
+  checks the tag against `Directory.Build.props` and this changelog, and publishes the release in
+  one step (nothing is published if a build fails). `release-check.yml` builds the installers
+  without publishing on every push that touches packaging.
+- `s3drive --version` prints the installed version.
+- `INSTALL.md`: installing, getting past the unsigned-build SmartScreen prompt, upgrading, the
+  portable `.zip`, checksum verification, uninstalling, and building the installers.
+- Publisher and imaging test suites (27 cases) in `Test.Shared`, run by all three runners.
 - Regression tests for the upgraded dependencies: `BlobS3Store` surfaces a failure (not an
   empty result) when the endpoint refuses connections, and `ObjectLocks` leaves a key
   acquirable after a canceled wait and honors a pre-canceled token.

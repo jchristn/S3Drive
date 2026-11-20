@@ -1,6 +1,7 @@
 namespace S3Drive.Tui
 {
     using System;
+    using System.Reflection;
     using System.Threading.Tasks;
     using S3Drive.Core.Configuration;
     using S3Drive.Core.Diagnostics;
@@ -10,6 +11,12 @@ namespace S3Drive.Tui
     {
         internal static async Task<int> Main(string[] args)
         {
+            if (HasFlag(args, "--version"))
+            {
+                Console.WriteLine("S3Drive " + ProductVersion());
+                return 0;
+            }
+
             bool showSplash = !HasFlag(args, "--no-splash");
 
             S3DrivePaths paths = new S3DrivePaths();
@@ -53,6 +60,16 @@ namespace S3Drive.Tui
             }
 
             return false;
+        }
+
+        private static string ProductVersion()
+        {
+            Assembly assembly = typeof(Program).Assembly;
+            string? informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (string.IsNullOrEmpty(informational)) return assembly.GetName().Version?.ToString(3) ?? "unknown";
+
+            int metadata = informational.IndexOf('+');
+            return metadata >= 0 ? informational.Substring(0, metadata) : informational;
         }
 
         private static void RegisterGlobalHandlers()

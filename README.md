@@ -60,19 +60,61 @@ the tray does.
 a Windows user-mode filesystem driver, so it runs only on Windows. There is **no FUSE (macOS/Linux)
 version planned** — S3Drive is not intended to be cross-platform.
 
+## Download and install
+
+Download the installer for your PC from the
+**[Releases page](https://github.com/jchristn/S3Drive/releases)**. Releases are alpha (`0.x`) and marked
+Pre-release.
+
+| Platform | File |
+| --- | --- |
+| Windows (x64, most PCs) | `s3drive-<version>-win-x64-setup.exe` |
+| Windows on ARM | `s3drive-<version>-win-arm64-setup.exe` |
+| Portable, scripts, and automation | `s3drive-<version>-win-x64.zip` / `s3drive-<version>-win-arm64.zip` |
+
+> [!IMPORTANT]
+> **These builds are not code-signed, so Windows blocks the first launch.** This is expected and does not mean the
+> download is damaged. The steps to allow S3Drive are below. To confirm a file is the one published here, check it
+> against `SHA256SUMS`.
+>
+> S3Drive is free, open-source software and is not code-signed (signing certificates are an ongoing cost we choose
+> not to pass on).
+
+When you run the installer, Windows shows *Windows protected your PC. Microsoft Defender SmartScreen prevented an
+unrecognized app from starting.* with only a **Don't run** button. Click **More info**, then **Run anyway**.
+
+If your browser warns that the file *isn't commonly downloaded*, choose **Keep**. In Edge, open the **...** menu on
+the download, choose **Keep**, then **Show more > Keep anyway**.
+
+For the `.zip`, unblock it before extracting, or every program inside it is blocked too: right-click the file >
+**Properties** > **Unblock**, or in PowerShell:
+
+```powershell
+Unblock-File .\s3drive-<version>-win-x64.zip
+```
+
+S3Drive needs the [Dokany](https://github.com/dokan-dev/dokany/releases) 2 driver (see Requirements); Setup reminds
+you if it is missing. Setup installs S3Drive to Program Files, adds the `s3drive` command to PATH, adds Start menu
+shortcuts, and starts the S3Drive Agent in the system tray (and, if you leave the box checked, at every sign-in). Open
+a new terminal and run `s3drive`. The builds are self-contained, so no .NET install is needed. `winget`, Scoop, and
+Chocolatey packages are planned and not yet available. [`INSTALL.md`](INSTALL.md) covers upgrading, the portable
+`.zip`, checksum verification, and uninstalling.
+
 ## Requirements
 
-- Windows 10/11 (x64).
-- The **Dokany** driver installed (S3Drive uses the managed Dokan.NET wrapper over it).
+- Windows 10/11, x64 or ARM64.
+- The **Dokany** 2 driver installed (S3Drive uses the managed Dokan.NET wrapper over it).
   Download and install it from the official releases page:
   <https://github.com/dokan-dev/dokany/releases>. Dokany is a separate, independently-licensed
-  prerequisite (dual **LGPL-2.1 / MIT**, also offered commercially) — it is not bundled with
-  S3Drive.
-- The **.NET 8 Desktop Runtime** to run, or the **.NET 8 SDK** to build.
+  prerequisite (dual **LGPL-2.1 / MIT**, also offered commercially) and is not bundled with
+  S3Drive. The installer checks for it and offers the download page if it is missing.
+- To build from source: the **.NET 10 SDK** (it builds the `net8.0` projects and the multi-targeted
+  tests). The released builds are self-contained and need no .NET runtime.
 
 ## Getting started
 
-From the repository root:
+Install from the [Releases page](https://github.com/jchristn/S3Drive/releases) (above), then run `s3drive` or choose
+**S3Drive** from the Start menu. To run from source instead, from the repository root:
 
 ```bat
 go.bat
@@ -145,6 +187,8 @@ consistency and coherency, even at the cost of concurrent access to the same fil
 S3Drive.sln
 Directory.Build.props        shared build settings (net8.0, version 0.1.1, conventions)
 go.bat                       build the solution and launch the TUI
+publisher.json               installer manifest: product identity, artifacts, runtimes, channels
+build-installers.{bat,sh}    build the installers into installers/<version>/ (see INSTALL.md)
 assets/                      logo.png, logo.ico
   grafana/                   Grafana dashboards (provisioned by docker/compose.yaml)
 docker/                      observability stack: compose.yaml, collector, Prometheus, Tempo, Loki, Grafana provisioning
@@ -152,6 +196,8 @@ src/
   S3Drive.Core/              all logic: config, storage (Blobject), filesystem, mounts, locks, telemetry emit
   S3Drive.Agent/             Avalonia tray agent (owns mounts)
   S3Drive.Tui/               TUIKit configuration and monitoring console
+  S3Drive.Publisher/         release packager: self-contained publish, .zip, Inno Setup installer, SHA256SUMS
+.github/workflows/           release.yml (a tag push publishes a release), release-check.yml, build-windows.yml
 test/
   Test.Shared/               every test, as Touchstone descriptors (single source of truth)
   Test.Automated/            console runner, plus interactive mount/agent harness modes
@@ -191,6 +237,7 @@ bucket through the Dokany driver and drives real file operations against it, and
 
 ## Documentation
 
+- [`INSTALL.md`](INSTALL.md): installing, upgrading, verifying, and uninstalling; building the installers; releasing.
 - [`archive/S3DRIVE_PLAN.md`](archive/S3DRIVE_PLAN.md) — the original design and implementation plan.
 - [`CONCURRENCY_AND_LOCKING.md`](CONCURRENCY_AND_LOCKING.md) — exactly how S3Drive handles
   concurrent access and locking, and the boundaries of its guarantees.
@@ -219,6 +266,7 @@ from <https://github.com/dokan-dev/dokany>.
 | [Avalonia](https://github.com/AvaloniaUI/Avalonia) (`Avalonia`, `.Desktop`, `.Themes.Fluent`) | Tray icon and About window | MIT |
 | [Radiant](https://www.nuget.org/packages/Radiant) (agent only) | Telemetry host (OTLP, Prometheus, Loki export) | MIT |
 | [OpenTelemetry .NET](https://github.com/open-telemetry/opentelemetry-dotnet) (via Radiant) | Metrics, traces, and logs SDK and exporters | Apache-2.0 |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) (build-time only) | Windows installer | Inno Setup License (free) |
 | [Touchstone](https://github.com/jchristn/touchstone) (tests only) | Runner-agnostic test descriptors | MIT |
 | [xUnit](https://github.com/xunit/xunit), [NUnit](https://github.com/nunit/nunit) (tests only) | Test runners | Apache-2.0 / MIT |
 | [.NET 8](https://github.com/dotnet/runtime) / `System.Text.Json` | Runtime and serialization | MIT |

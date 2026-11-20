@@ -34,3 +34,6 @@ crash-logs/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Installer outputs (build-installers.{bat,sh}, S3Drive.Publisher)
+installers/

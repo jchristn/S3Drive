@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    S3Drive.Publisher - the release packager. Reads publisher.json at the repository root and
+    builds one installer channel at a time (publish, zip, inno, checksums), shelling out to the
+    native packagers. CI (.github/workflows/build-windows.yml) and build-installers.{bat,sh} both
+    drive it, so local and CI builds cannot drift apart. See INSTALL.md and
+    C:\code\Agents\requirements\INSTALLERS.md.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>
