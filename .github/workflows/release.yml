@@ -63,8 +63,23 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: installers-*
-          path: dist
+          path: downloaded
           merge-multiple: true
+
+      - name: Collect the installers into one folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The artifacts keep the installers/<version>/ folder, so flatten them, refusing duplicate names.
+          mkdir -p dist
+          find downloaded -type f -print0 | while IFS= read -r -d '' f; do
+            name="$(basename "$f")"
+            if [ -e "dist/$name" ]; then
+              echo "::error::Two artifacts contain $name"
+              exit 1
+            fi
+            mv "$f" "dist/$name"
+          done
 
       - name: Check every asset is present
         shell: bash
